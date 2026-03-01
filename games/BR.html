@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Basket Random</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<a href="../index.html" class="backBtn">← Back</a>
+
+<iframe src="https://html5.gamedistribution.com/bf1268dccb5d43e7970bb3edaa54afc8/?gd_sdk_referrer_url=https://mrbigbrain30.github.io/Uncle-s-Unblocked/games/BR.html" width="900" height="600" scrolling="none" frameborder="0"></iframe>
+
+<button id="fullscreenBtn">Go Fullscreen</button>
+
+<script>
+  const iframe = document.querySelector('iframe');
+  document.getElementById('fullscreenBtn').addEventListener('click', () => {
+    if (iframe.requestFullscreen) {
+      iframe.requestFullscreen();
+    } else if (iframe.webkitRequestFullscreen) {
+      iframe.webkitRequestFullscreen();
+    } else if (iframe.msRequestFullscreen) {
+      iframe.msRequestFullscreen();
+    }
+  });
+</script>
+
+</body>
+</html>

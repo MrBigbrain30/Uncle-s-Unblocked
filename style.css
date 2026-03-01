@@ -1,13 +1,23 @@
 body {
-  background: #111;
-  color: white;
-  font-family: Arial, sans-serif;
-  margin: 0;
+  background-image: url("assets/images/Background.avif");
+  background-size: cover;        /* fills screen */
+  background-position: center;   /* center */
+  background-repeat: no-repeat;  /* no tiling */
+  background-attachment: fixed;  /* parallax */
+
+  font-family: "Inter", Arial, sans-serif;
+  font-size: 30px;
+  margin:0px;
   text-align: center;
 }
 
 h1 {
   padding: 20px 0;
+  font-family: "Inter", Arial, sans-serif;
+  color: rgb(255, 255, 255);
+  text-shadow:
+    0 0 3px black,
+    0 0 6px black;
 }
 
 .grid {
@@ -36,4 +46,46 @@ iframe {
   display: block;
   margin: 20px auto;
   max-width: 100%;
+}
+
+a img {
+  width: 250px;      /* doesnt affect at the moment */
+  height: 500px;     /* vertical height */
+  object-fit: cover; /* crops cleanly */
+  display: block;    /* removes inline spacing weirdness */
+}
+
+.backBtn {
+  color: rgb(255, 255, 255);
+  text-decoration: none;   /* no underline */
+  font-weight: 600;
+  transition: 0.3s ease;   /* smooth color change */
+}
+
+.backBtn:hover {
+  color: rgb(206, 206, 206);            /* changes on hover */
+}
+
+#fullscreenBtn {
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-family: "Inter", sans-serif;
+
+  background: linear-gradient(135deg, rgb(7,193,235), rgb(0,140,200));
+  color: white;
+
+  border: none;
+  border-radius: 8px;
+
+  cursor: pointer;
+  transition: 0.3s ease;
+}
+
+#fullscreenBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(7,193,235,0.4);
+}
+
+#fullscreenBtn:active {
+  transform: scale(0.97);
 }
