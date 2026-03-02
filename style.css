@@ -89,3 +89,18 @@ a img {
 #fullscreenBtn:active {
   transform: scale(0.97);
 }
+
+.standardBtn {
+  display: inline-block;
+  padding: 12px 24px;
+  background-color: #007acc;
+  color: white;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: bold;
+  transition: 0.2s ease;
+}
+
+.contact-btn:hover {
+  background-color: #005fa3;
+}
