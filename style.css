@@ -101,6 +101,6 @@ a img {
   transition: 0.2s ease;
 }
 
-.contact-btn:hover {
+.standardBtn:hover {
   background-color: #005fa3;
 }
