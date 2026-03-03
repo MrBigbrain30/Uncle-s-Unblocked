@@ -104,3 +104,12 @@ a img {
 .standardBtn:hover {
   background-color: #005fa3;
 }
+
+a {
+    padding: 20px 0;
+  font-family: "Inter", Arial, sans-serif;
+  color: rgb(255, 255, 255);
+  text-shadow:
+    0 0 3px black,
+    0 0 6px black;
+}
