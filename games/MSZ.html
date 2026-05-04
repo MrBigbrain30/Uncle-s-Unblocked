@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Merge Survivor: Zombie!</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="icon" href="../favicon.ico">
+</head>
+<body>
+
+<a href="../index.html" class="backBtn">← Back</a>
+
+<iframe src="https://www.spatial.io/embed/Merge-Survivor-Zombie-65a6b43cca81d8e11d95c485?share=4874348336788790537&enableRtc=1" width="1280px" height="720px" allow="camera; fullscreen; autoplay; display-capture; microphone; clipboard-write"></iframe>
+
+<button id="fullscreenBtn">Go Fullscreen</button>
+
+<script>
+  const iframe = document.querySelector('iframe');
+  document.getElementById('fullscreenBtn').addEventListener('click', () => {
+    if (iframe.requestFullscreen) {
+      iframe.requestFullscreen();
+    } else if (iframe.webkitRequestFullscreen) {
+      iframe.webkitRequestFullscreen();
+    } else if (iframe.msRequestFullscreen) {
+      iframe.msRequestFullscreen();
+    }
+  });
+</script>
+
+</body>
+</html>
