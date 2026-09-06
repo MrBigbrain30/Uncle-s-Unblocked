@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Nagesh City</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127749;</text></svg>" />
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+<canvas id="nav"></canvas>
+
+<!-- ------------------------------------------------------------- boot --- -->
+<div id="boot">
+  <div class="boot-inner">
+    <h1 class="logo">NAGESH<span>CITY</span></h1>
+    <p class="tag">He only ever says one word.</p>
+    <div class="boot-cta">CLICK ANYWHERE TO BEGIN</div>
+    <p class="boot-note">Sound is most of this game. Headphones recommended.</p>
+  </div>
+</div>
+
+<div id="loading" class="hidden">
+  <div class="load-wrap">
+    <div id="load-text">Loading</div>
+    <div class="load-track"><div id="load-bar"></div></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- menu --- -->
+<div id="menu" class="hidden">
+  <div class="menu-inner">
+    <h1 class="logo">NAGESH<span>CITY</span></h1>
+    <p class="tag">Climb out of the Flats. Find out what the top is for.</p>
+    <div class="menu-btns">
+      <button class="btn" id="btn-new">NEW GAME</button>
+      <button class="btn" id="btn-continue">CONTINUE</button>
+      <button class="btn" id="btn-controls">CONTROLS</button>
+      <button class="btn" id="btn-credits">CREDITS</button>
+    </div>
+    <div class="vols">
+      <label>MASTER <input class="slider" type="range" id="vol-master" min="0" max="100" value="85" /></label>
+      <label>MUSIC <input class="slider" type="range" id="vol-music" min="0" max="100" value="50" /></label>
+    </div>
+    <p class="menu-foot">Every button here is Nagesh saying his own name at a randomly chosen pitch.</p>
+  </div>
+</div>
+
+<!-- ----------------------------------------------------------- panels --- -->
+<div id="controls" class="panel hidden">
+  <div class="panel-box">
+    <h2>CONTROLS</h2>
+    <div class="ctrl-grid">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div><div>Move / drive</div>
+      <div><kbd>Mouse</kbd></div><div>Look around</div>
+      <div><kbd>Shift</kbd></div><div>Sprint</div>
+      <div><kbd>Space</kbd></div><div>Jump &middot; handbrake in a vehicle</div>
+      <div><kbd>F</kbd></div><div>Enter / exit a vehicle</div>
+      <div><kbd>E</kbd></div><div>Interact &middot; advance dialogue</div>
+      <div><kbd>H</kbd></div><div>Whistle for your vehicle (once you have one)</div>
+      <div><kbd>M</kbd></div><div>Full district map</div>
+      <div><kbd>Esc</kbd></div><div>Pause</div>
+      <div><kbd>Wheel</kbd></div><div>Zoom the camera</div>
+    </div>
+    <p class="panel-note">
+      Yellow marker on the map = the next mission. Follow the light column, the
+      minimap blip, or the arrow at the edge of the screen. The north gate stays
+      shut until every mission in your district is finished.
+    </p>
+    <p class="panel-note">
+      Hit a street light above about 20&nbsp;km/h and it goes over. It costs you
+      a little paint and a little speed, and it stays down.
+    </p>
+    <button class="btn panel-close">CLOSE</button>
+  </div>
+</div>
+
+<div id="credits" class="panel hidden">
+  <div class="panel-box">
+    <h2>CREDITS</h2>
+    <p class="credit-line"><strong>Nagesh</strong> &mdash; voiced by the single recording you provided,
+      pitched between 0.46&times; and 2.05&times; depending on how his day is going.</p>
+    <p class="credit-line"><strong>Everyone else</strong> &mdash; oscillator blips, one per letter,
+      tuned per character.</p>
+    <p class="credit-line"><strong>All art</strong> &mdash; generated at runtime onto 2D canvases:
+      every facade, hoarding, poster, portrait and road surface. There is not a
+      single image file in this project.</p>
+    <p class="credit-line"><strong>All music</strong> &mdash; a step sequencer running on Web Audio.
+      Four tracks, one per district. The Heights are deliberately fourteen cents flat.</p>
+    <p class="credit-line"><strong>Engine</strong> &mdash; three.js r169, vendored locally so the game
+      runs with no network at all.</p>
+    <button class="btn panel-close">CLOSE</button>
+  </div>
+</div>
+
+<!-- -------------------------------------------------------------- hud --- -->
+<div id="hud" class="hidden">
+
+  <div id="objective" class="hidden">
+    <div id="obj-title"></div>
+    <div id="obj-text"></div>
+    <div id="obj-count"></div>
+  </div>
+
+  <div id="stats">
+    <div class="stat-row"><span class="stat-k">CASH</span><span id="cash" class="stat-v">0</span></div>
+    <div class="stat-row"><span class="stat-k">FAME</span><span id="fame" class="stat-v">0</span></div>
+    <div class="stat-row hidden" id="debt-row"><span class="stat-k owed">OWED</span><span id="debt" class="stat-v owed">0</span></div>
+  </div>
+
+  <div id="health-wrap">
+    <div class="bar-label">NAGESH</div>
+    <div class="bar"><div id="health-fill"></div></div>
+  </div>
+
+  <div id="body-wrap" class="hidden">
+    <div class="bar-label">VEHICLE</div>
+    <div class="bar"><div id="body-fill"></div></div>
+  </div>
+
+  <div id="map-corner">
+    <canvas id="minimap"></canvas>
+    <div id="district-name"></div>
+  </div>
+
+  <div id="speedo" class="hidden">
+    <div id="speed-val">0</div>
+    <div class="speed-unit">KM/H</div>
+    <div id="speed-name"></div>
+  </div>
+
+  <div id="timer" class="hidden">0:00</div>
+
+  <div id="progress" class="hidden">
+    <div id="prog-label"></div>
+    <div class="prog-track"><div id="prog-fill"></div></div>
+  </div>
+
+  <div id="hint" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="interact" class="hidden"></div>
+  <div id="veh-prompt" class="hidden"><kbd>F</kbd> Get in</div>
+  <div id="whistle-prompt" class="hidden"><kbd>H</kbd> Whistle for your ride</div>
+
+  <div id="titlecard" class="hidden">
+    <div id="tc-label">NEW MISSION</div>
+    <div id="tc-title"></div>
+    <div id="tc-brief"></div>
+  </div>
+
+  <div id="banner" class="banner hidden">
+    <div id="banner-title"></div>
+    <div id="banner-sub"></div>
+  </div>
+
+  <div id="dialogue" class="hidden">
+    <div id="dlg-portrait"></div>
+    <div class="dlg-body">
+      <div id="dlg-name"></div>
+      <div id="dlg-text"></div>
+      <div id="dlg-cue"></div>
+    </div>
+    <div id="dlg-next">&#9654;</div>
+  </div>
+
+</div>
+
+<!-- -------------------------------------------------------- overlays --- -->
+<div id="chapter" class="hidden">
+  <div class="ch-inner">
+    <div id="ch-num"></div>
+    <div id="ch-name"></div>
+    <div id="ch-line"></div>
+  </div>
+</div>
+
+<div id="fullmap" class="hidden">
+  <canvas id="fullmap-canvas"></canvas>
+  <div class="map-foot"><kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
+</div>
+
+<div id="choice" class="hidden">
+  <div class="choice-inner">
+    <div id="choice-label">SUB-LEVEL 9 &middot; TERMINAL</div>
+    <div id="choice-list"></div>
+  </div>
+</div>
+
+<div id="ending" class="hidden">
+  <div class="end-inner">
+    <div id="end-title"></div>
+    <div id="end-body"></div>
+    <div id="end-epi"></div>
+  </div>
+</div>
+
+<div id="pause" class="hidden">
+  <div class="pause-inner">
+    <h2>PAUSED</h2>
+    <button class="btn" id="btn-resume">RESUME</button>
+    <button class="btn" id="btn-pause-map">DISTRICT MAP</button>
+    <button class="btn" id="btn-pause-controls">CONTROLS</button>
+    <button class="btn" id="btn-quit">SAVE &amp; QUIT TO MENU</button>
+  </div>
+</div>
+
+<div id="flash" class="hidden"></div>
+<div id="vignette"></div>
+<div id="fade"></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
