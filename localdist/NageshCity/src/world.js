@@ -423,17 +423,20 @@ function finishDistrict(ctx) {
     claim('standpipe', wantsBig(60, 60));
     claim('impound', wantsBig(70, -60));
     claim('castingVan', wantsBig(-20, -70));
+    claim('gunYard', wantsBig(20, 20));
     claim('deepaHut', near(-25, 55));
   } else if (def.id === 'midtown') {
     claim('vantaOffice', wantsBig(0, -25));
     claim('depot', wantsBig(-70, 60));
     claim('studio9', wantsBig(70, 20));
     claim('loop', wantsBig(-60, -60));
+    claim('pawn', wantsBig(60, -60));
   } else if (def.id === 'heights') {
     claim('villa', wantsBig(-60, 25));
     claim('pavilion', wantsBig(55, 55));
     claim('emptyHouse', wantsBig(65, -55));
     claim('spire', wantsBig(-25, -60));
+    claim('concierge', wantsBig(20, 20));
   }
 
   // --- fill the ordinary blocks -------------------------------------------
@@ -592,22 +595,34 @@ function buildLandmarks(ctx) {
     if (L.scrapyard) {
       const b = L.scrapyard;
       b.label = "Deepa's Scrapyard";
-      b.spot = { x: b.cx, z: b.cz };
+      // The gap in the fence is on the +X side, so the drop-off bay sits
+      // straight in from it with a clear lane between the two. You are meant
+      // to drive a loaded tuk-tuk in here; salvage piled across the only way
+      // in made that a wrestling match rather than a delivery.
+      const lane = laneFromGate(b, 5.4, 0.18);
+      b.spot = { x: lane.padX, z: b.cz };
+      b.drive = lane;
       pad(b, 0x5a4a36);
       // Chain fence.
       fence(ctx, b, 0x6a6a62, 2.6);
-      // Heaps of salvage.
+      // The bay itself: swept concrete, painted edge, so it reads as somewhere
+      // to stop rather than just a hole in the junk.
+      helpers.prop(cbox(9, 0.12, 9), 0x6f6659, lane.padX, 0.24, b.cz);
+      helpers.glow(cbox(9.4, 0.04, 0.3), 0xffc94a, lane.padX, 0.32, b.cz - 4.6);
+      helpers.glow(cbox(9.4, 0.04, 0.3), 0xffc94a, lane.padX, 0.32, b.cz + 4.6);
+      // Heaps of salvage - anywhere except across the way in.
       for (let i = 0; i < 26; i++) {
         const x = b.cx + rng.range(-b.w / 2 + 5, b.w / 2 - 5);
         const z = b.cz + rng.range(-b.d / 2 + 5, b.d / 2 - 5);
+        if (lane.blocks(x, z, 1.6)) continue;
         const s = rng.range(0.6, 2.2);
         helpers.prop(cbox(s, s * rng.range(0.4, 1.1), s), rng.pick([0x8a6a4a, 0x6f7a6a, 0x96794f, 0x7a4a3a]),
           x, s * 0.4, z, rng() * TAU);
         solid(x, z, s * 0.62, s * 0.62, s);
       }
-      // A crushed car on the pile, tyres to the sky.
-      helpers.prop(cbox(4.2, 1.1, 1.9), 0x6a4a3a, b.cx + 6, 2.4, b.cz - 5, 0.5);
-      solid(b.cx + 6, b.cz - 5, 2.2, 1.6, 3.2);
+      // A crushed car on the pile, tyres to the sky - well off the lane.
+      helpers.prop(cbox(4.2, 1.1, 1.9), 0x6a4a3a, b.cx - 4, 2.4, b.cz - b.d * 0.3, 0.5);
+      solid(b.cx - 4, b.cz - b.d * 0.3, 2.2, 1.6, 3.2);
       const hut = { w: 6, d: 5, h: 3.4 };
       addBuilding(ctx, b.cx - b.w / 4, b.cz + b.d / 4, hut.w, hut.d, hut.h, 0);
     }
@@ -629,16 +644,28 @@ function buildLandmarks(ctx) {
     if (L.impound) {
       const b = L.impound;
       b.label = 'Municipal Impound';
-      b.spot = { x: b.cx, z: b.cz };
+      // Same problem, same fix: the seized cars used to be parked across the
+      // only route from the broken gate to the middle of the yard, so the one
+      // vehicle you were sent here to drive out could not be driven out.
+      const lane = laneFromGate(b, 5.6, 0.14);
+      b.spot = { x: lane.padX, z: b.cz };
+      b.drive = lane;
       pad(b, 0x4a4a48);
       fence(ctx, b, 0x8a3f2f, 3.2);
+      // Two rows of seized vehicles, one either side of the driveway.
       for (let i = 0; i < 6; i++) {
-        const cx = b.cx - b.w / 2 + 6 + (i % 3) * 7;
-        const cz = b.cz - 6 + Math.floor(i / 3) * 8;
+        const cx = b.cx - b.w / 2 + 7 + (i % 3) * 7.5;
+        const cz = b.cz + (i < 3 ? -1 : 1) * (lane.halfWidth + 4.5);
         helpers.prop(cbox(3.8, 1.2, 1.7), rng.pick([0x5a5a62, 0x6a4a3a, 0x3f5a4a]),
           cx, 0.8, cz, rng.range(-0.2, 0.2));
         solid(cx, cz, 2.0, 1.2, 1.4);
       }
+      // A painted release bay at the end of the lane, and a broken barrier arm
+      // lying beside the gate that is the reason any of this is possible.
+      helpers.prop(cbox(10, 0.12, 9), 0x565650, lane.padX, 0.24, b.cz);
+      helpers.glow(cbox(10.4, 0.04, 0.3), 0xffc94a, lane.padX, 0.32, b.cz - 4.6);
+      helpers.glow(cbox(10.4, 0.04, 0.3), 0xffc94a, lane.padX, 0.32, b.cz + 4.6);
+      helpers.prop(cbox(5.6, 0.22, 0.3), 0xd8d0c0, b.cx + b.w / 2 - 4, 0.3, b.cz + lane.halfWidth + 1.6, 0.24);
     }
     if (L.castingVan) {
       const b = L.castingVan;
@@ -653,6 +680,26 @@ function buildLandmarks(ctx) {
         helpers.prop(ccyl(0.09, 0.09, 1.0, 6), 0xc8c8c8, b.cx + i * 1.8, 0.7, b.cz + 5);
       }
       helpers.glow(cbox(6.4, 1.6, 0.1), 0xffe08a, b.cx, 3.4, b.cz - 5.6);
+    }
+    if (L.gunYard) {
+      const b = L.gunYard;
+      b.label = "Gurjaap's Yard";
+      b.spot = { x: b.cx, z: b.cz + b.d / 2 - 7 };
+      pad(b, 0x4f463a);
+      buildShop(ctx, b, {
+        sign: 0xd88a2a, name: 'gunYard',
+        counterColor: 0x6a5236, awning: 0x7a3f2f,
+      });
+      // A back yard with a berm to shoot into, which is what the Flats have
+      // instead of a range.
+      helpers.prop(cbox(b.w - 12, 2.6, 2.2), 0x6a5c46, b.cx, 1.3, b.cz - b.d / 2 + 6);
+      solid(b.cx, b.cz - b.d / 2 + 6, (b.w - 12) / 2, 1.4, 2.6);
+      for (let i = 0; i < 7; i++) {
+        helpers.prop(ccyl(0.42, 0.42, 1.1, 8), rng.pick([0x7a4a2a, 0x3f5a4a]),
+          b.cx - b.w / 2 + 6 + i * 3.4, 0.55, b.cz - b.d / 2 + 11);
+        solid(b.cx - b.w / 2 + 6 + i * 3.4, b.cz - b.d / 2 + 11, 0.45, 0.45, 1.1);
+      }
+      b.range = { x: b.cx, z: b.cz - b.d / 2 + 14 };
     }
     if (L.deepaHut) {
       L.deepaHut.label = "Deepa's Place";
@@ -715,6 +762,16 @@ function buildLandmarks(ctx) {
       }
       helpers.glow(ccyl(0.6, 0.6, 9, 8), 0xff3d8a, b.cx, 4.6, b.cz);
     }
+    if (L.pawn) {
+      const b = L.pawn;
+      b.label = 'Cross Pawn & Surplus';
+      b.spot = { x: b.cx, z: b.cz + b.d / 2 - 7 };
+      pad(b, 0x2f2a34);
+      buildShop(ctx, b, {
+        sign: 0x3df0ff, name: 'pawn', counterColor: 0x3a3440, awning: 0x2f3a5a, neon: true,
+      });
+      addBuilding(ctx, b.cx, b.cz - b.d / 4, b.w - 14, b.d * 0.34, 16, 0);
+    }
   }
 
   if (def.id === 'heights') {
@@ -767,7 +824,79 @@ function buildLandmarks(ctx) {
       helpers.glow(cbox(3.4, 0.1, 3.4), 0x53d0ff, b.cx + 12, 0.62, b.cz + 12);
       L.spire.descent = { x: b.cx + 12, z: b.cz + 12 };
     }
+    if (L.concierge) {
+      const b = L.concierge;
+      b.label = 'Aurum Concierge';
+      b.spot = { x: b.cx, z: b.cz + b.d / 2 - 7 };
+      pad(b, 0xe8e2d0, 0.3);
+      buildShop(ctx, b, {
+        sign: 0xd4af37, name: 'concierge', counterColor: 0xf0ead8, awning: 0xd8d2bc,
+      });
+      for (const s of [-1, 1]) {
+        helpers.prop(ccyl(0.4, 0.44, 5.5, 8), 0xfaf6ea, b.cx + s * 7, 2.9, b.cz + b.d / 2 - 11);
+        addCollider(new Box(b.cx + s * 7, b.cz + b.d / 2 - 11, 0.5, 0.5, 5.5, 'prop'));
+      }
+    }
   }
+}
+
+/**
+ * A yard whose only entrance is the gap on the +X side of its fence needs a
+ * lane from that gap to somewhere you can actually stop. Returns the bay's
+ * position plus a test for "is this in the way", so the generator can scatter
+ * clutter everywhere except across the route.
+ */
+function laneFromGate(b, halfWidth, padFrac) {
+  const hw = b.w / 2 - 1;
+  const padX = b.cx + b.w * padFrac;
+  const x0 = padX - 5.4;
+  const x1 = b.cx + hw + 2.5;
+  return {
+    padX, halfWidth, x0, x1,
+    blocks(x, z, pad = 0) {
+      return x > x0 - pad && x < x1 + pad && Math.abs(z - b.cz) < halfWidth + pad;
+    },
+  };
+}
+
+/**
+ * A place to spend money in: a counter you stand at, a shutter behind it, and a
+ * sign above it loud enough to find from the road.
+ */
+function buildShop(ctx, b, cfg) {
+  const { helpers, addCollider } = ctx;
+  const front = b.cz + b.d / 2 - 9;
+  const solid = (x, z, hw, hd, h) => addCollider(new Box(x, z, hw, hd, h, 'prop'));
+
+  // Back wall and shutter.
+  helpers.prop(cbox(14, 4.6, 0.6), cfg.counterColor, b.cx, 2.3, front - 3.4);
+  solid(b.cx, front - 3.4, 7, 0.5, 4.6);
+  helpers.prop(cbox(9, 3.2, 0.2), 0x2a2620, b.cx, 1.6, front - 3.05);
+
+  // Counter. Deliberately not a collider you can vault - you talk over it.
+  helpers.prop(cbox(9, 1.05, 1.1), cfg.counterColor, b.cx, 0.7, front - 1.6);
+  helpers.prop(cbox(9.4, 0.1, 1.4), 0x8a7250, b.cx, 1.28, front - 1.6);
+  solid(b.cx, front - 1.6, 4.5, 0.6, 1.2);
+
+  // Awning on two posts.
+  helpers.prop(cbox(11, 0.16, 4), cfg.awning, b.cx, 3.5, front - 0.6);
+  for (const s of [-1, 1]) {
+    helpers.prop(ccyl(0.1, 0.12, 3.5, 6), 0x3a3630, b.cx + s * 5.2, 1.75, front + 1.2);
+    solid(b.cx + s * 5.2, front + 1.2, 0.2, 0.2, 3.5);
+  }
+
+  // The sign, which is the only reason anyone finds the place.
+  helpers.glow(cbox(8.4, 1.1, 0.12), cfg.sign, b.cx, 4.4, front - 0.6);
+  if (cfg.neon) {
+    helpers.glow(cbox(0.24, 3.4, 0.24), cfg.sign, b.cx + 6.4, 3.2, front - 0.6);
+  }
+  // A lit pole, so the shop shows over the rooftops the way a marker does.
+  helpers.prop(ccyl(0.16, 0.2, 11, 6), 0x3a3630, b.cx + 6.9, 5.5, front - 0.6);
+  helpers.glow(ccyl(0.3, 0.3, 2.2, 6), cfg.sign, b.cx + 6.9, 11.6, front - 0.6);
+  solid(b.cx + 6.9, front - 0.6, 0.3, 0.3, 11);
+
+  b.shop = cfg.name;
+  b.counter = { x: b.cx, z: front + 1.4 };
 }
 
 const _clearScratch = [];

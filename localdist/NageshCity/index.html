@@ -55,10 +55,14 @@
     <div class="ctrl-grid">
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div><div>Move / drive</div>
       <div><kbd>Mouse</kbd></div><div>Look around</div>
+      <div><kbd>RMB</kbd></div><div>Aim (hold)</div>
+      <div><kbd>LMB</kbd></div><div>Fire &middot; works from the driver's seat too</div>
+      <div><kbd>R</kbd></div><div>Reload</div>
+      <div><kbd>Q</kbd> / <kbd>1</kbd>&ndash;<kbd>6</kbd></div><div>Next weapon / pick one</div>
       <div><kbd>Shift</kbd></div><div>Sprint</div>
       <div><kbd>Space</kbd></div><div>Jump &middot; handbrake in a vehicle</div>
-      <div><kbd>F</kbd></div><div>Enter / exit a vehicle</div>
-      <div><kbd>E</kbd></div><div>Interact &middot; advance dialogue</div>
+      <div><kbd>F</kbd></div><div>Enter / exit a vehicle (an empty one &mdash; traffic has drivers in it)</div>
+      <div><kbd>E</kbd></div><div>Interact &middot; buy at a counter &middot; advance dialogue</div>
       <div><kbd>H</kbd></div><div>Whistle for your vehicle (once you have one)</div>
       <div><kbd>M</kbd></div><div>Full district map</div>
       <div><kbd>Esc</kbd></div><div>Pause</div>
@@ -68,6 +72,24 @@
       Yellow marker on the map = the next mission. Follow the light column, the
       minimap blip, or the arrow at the edge of the screen. The north gate stays
       shut until every mission in your district is finished.
+    </p>
+    <p class="panel-note">
+      Aim before you shoot: hip fire scatters, and it scatters a great deal more
+      from a moving car. Head shots do roughly two and a half times the damage.
+      Bodies drop cash, and cash picked up off the floor is the only money in
+      this game that is not also added to what you owe.
+    </p>
+    <p class="panel-note">
+      Break contact and Nagesh patches himself up after about five seconds.
+      A vest does not come back on its own &mdash; that is what Gurjaap is for.
+      Get behind something solid: they cannot shoot you through a wall, and they
+      will come looking rather than wait.
+    </p>
+    <p class="panel-note">
+      Vehicles have panels, and when the panels run out the vehicle catches
+      fire and gives you a few seconds to be somewhere else. Shoot one that
+      somebody is hiding behind. Do not stand next to one that is already
+      burning.
     </p>
     <p class="panel-note">
       Hit a street light above about 20&nbsp;km/h and it goes over. It costs you
@@ -83,7 +105,10 @@
     <p class="credit-line"><strong>Nagesh</strong> &mdash; voiced by the single recording you provided,
       pitched between 0.46&times; and 2.05&times; depending on how his day is going.</p>
     <p class="credit-line"><strong>Everyone else</strong> &mdash; oscillator blips, one per letter,
-      tuned per character.</p>
+      tuned per character. Gurjaap is a sawtooth at 168&nbsp;Hz; Hishaan is a
+      triangle at 226 and barely moves.</p>
+    <p class="credit-line"><strong>All gunfire</strong> &mdash; a crack of filtered noise, a body
+      thump and a tail, in different proportions per weapon. Nothing sampled.</p>
     <p class="credit-line"><strong>All art</strong> &mdash; generated at runtime onto 2D canvases:
       every facade, hoarding, poster, portrait and road surface. There is not a
       single image file in this project.</p>
@@ -115,10 +140,27 @@
     <div class="bar"><div id="health-fill"></div></div>
   </div>
 
+  <div id="armour-wrap" class="hidden">
+    <div class="bar-label">VEST</div>
+    <div class="bar"><div id="armour-fill"></div></div>
+  </div>
+
   <div id="body-wrap" class="hidden">
     <div class="bar-label">VEHICLE</div>
     <div class="bar"><div id="body-fill"></div></div>
   </div>
+
+  <div id="weapon" class="hidden">
+    <div id="wpn-name"></div>
+    <div id="wpn-ammo"></div>
+    <div id="wpn-hint"></div>
+  </div>
+
+  <div id="crosshair" class="hidden">
+    <i class="ch-t"></i><i class="ch-b"></i><i class="ch-l"></i><i class="ch-r"></i>
+  </div>
+
+  <div id="killfeed"></div>
 
   <div id="map-corner">
     <canvas id="minimap"></canvas>
@@ -181,6 +223,24 @@
   <div class="map-foot"><kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
 </div>
 
+<div id="shop" class="hidden">
+  <div class="shop-inner">
+    <div class="shop-head">
+      <div>
+        <div id="shop-name"></div>
+        <div id="shop-blurb"></div>
+      </div>
+      <div class="shop-wallet">
+        <div class="shop-wallet-k">CASH IN HAND</div>
+        <div id="shop-cash"></div>
+      </div>
+    </div>
+    <div id="shop-line"></div>
+    <div id="shop-list"></div>
+    <div class="shop-foot">Nothing bought here is added to your balance. That is the entire difference.</div>
+  </div>
+</div>
+
 <div id="choice" class="hidden">
   <div class="choice-inner">
     <div id="choice-label">SUB-LEVEL 9 &middot; TERMINAL</div>
@@ -207,6 +267,7 @@
 </div>
 
 <div id="flash" class="hidden"></div>
+<div id="boom" class="hidden"></div>
 <div id="vignette"></div>
 <div id="fade"></div>
 

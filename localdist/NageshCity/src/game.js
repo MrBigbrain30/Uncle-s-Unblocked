@@ -11,9 +11,10 @@ import { MissionRunner } from './missions.js';
 import { Minimap } from './minimap.js';
 import { UI } from './ui.js';
 import { audio, VOICE } from './audio.js';
-import { CHAPTERS, CHATTER, ENDINGS, CHARACTERS } from './story.js';
-import { makeCharacter, OUTFITS } from './actors.js';
-import { clamp, damp, dampAngle, dist2, makeRNG, TAU, resolveCircle, Box } from './util.js';
+import { CHAPTERS, CHATTER, ENDINGS, CHARACTERS, SHOPS } from './story.js';
+import { makeCharacter, makeFireFX, OUTFITS } from './actors.js';
+import { Combat, WEAPONS, SERVICES } from './combat.js';
+import { clamp, damp, dampAngle, dist2, makeRNG, TAU, angleDelta, resolveCircle, Box } from './util.js';
 import { skyTexture } from './art.js';
 
 const SAVE_KEY = 'nagesh-city-save-v1';
@@ -54,17 +55,22 @@ export class Game {
     this.player = new Player(this.scene);
     this.missions = new MissionRunner(this);
     this.missions.attach(this.scene);
+    this.combat = new Combat(this);
+    this.combat.attach(this.scene);
 
     this.districts = new Map();
     this.district = null;
     this.vehicles = [];
+    this.burning = [];        // vehicles counting down to a crater
     this.peds = [];
+    this.shops = [];
     this.waypoints = [];
     this.unlocked = new Set(['slums']);
     this.stats = { cash: 0, fame: 0, debt: 0, contract: false };
     this.canWhistle = false;
     this.paused = false;
     this.mapOpen = false;
+    this.shopOpen = false;
     this.running = false;
     this.carrying = null;
     this.deathTimer = 0;
@@ -80,7 +86,9 @@ export class Game {
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
     canvas.addEventListener('click', () => {
-      if (this.running && !this.paused && !this.ui.dialogueActive && !this.mapOpen) this.input.requestLock();
+      if (this.running && !this.paused && !this.ui.dialogueActive && !this.mapOpen && !this.shopOpen) {
+        this.input.requestLock();
+      }
     });
   }
 
@@ -124,6 +132,7 @@ export class Game {
     // A mission belongs to the district it was handed out in. If one is
     // somehow still live, drop it, or the new district gets no start marker.
     if (this.missions.state !== 'idle') this.missions.abandonAll();
+    this.combat.clearAll();
     if (this.district) {
       this.district.group.visible = false;
       this.clearVehicles();
@@ -151,6 +160,8 @@ export class Game {
     // Outfit tracks status. Nagesh dresses like wherever he has got to - and
     // he walks into Sub-Level 9 still wearing the Heights.
     this.player.setOutfit(id === 'vault' ? 'heights' : id);
+    // The outfit change rebuilds the whole rig, gun hand included.
+    this.combat.onPlayerRebuilt();
 
     const sp = opts.spawn || def.spawn || { x: 0, z: 0, rot: 0 };
     if (this.player.inVehicle) this.player.exit(d.grid);
@@ -161,6 +172,7 @@ export class Game {
     if (d.lamps) d.lamps.reset();
     this.spawnTraffic(d);
     this.spawnPeds(d);
+    this.buildShops(d);
     this.refreshGate();
     this.minimap.ensureCache(d);
     audio.playTrack(def.music);
@@ -228,6 +240,330 @@ export class Game {
     for (const v of (d.def.vehicles || [])) {
       this.spawnVehicle(v.type, v.x, v.z, v.rot || 0, v.color);
     }
+    // Live traffic on top of the parked stuff. Six is enough for the roads to
+    // feel used without turning every junction into a queue.
+    const roads = d.def.roads || [];
+    if (roads.length < 2) return;
+    const types = d.def.id === 'slums' ? ['tuk', 'scooter', 'hatch', 'tuk', 'van', 'scooter']
+      : d.def.id === 'midtown' ? ['sedan', 'hatch', 'van', 'sedan', 'scooter', 'hatch']
+        : ['sedan', 'limo', 'sports', 'sedan', 'hatch', 'limo'];
+    for (let i = 0; i < types.length; i++) {
+      this.spawnTrafficVehicle(types[i], {
+        axis: this.rng.chance(0.5) ? 'x' : 'z',
+        laneIdx: this.rng.int(0, roads.length - 1),
+        index: this.rng.int(0, roads.length - 1),
+        dir: this.rng.sign(),
+      });
+    }
+  }
+
+  /**
+   * A car with a driver in it. It is an ordinary Vehicle, so it collides with
+   * you, takes gunfire and burns - the AI is only a set of inputs pushed into
+   * the same physics everything else uses.
+   *
+   * The route is not a list of points. It is a lane: an axis to travel along, a
+   * road to travel on, and a direction. At each junction it picks straight on
+   * or a turn, and never a U-turn. The old version chose random road
+   * coordinates for each leg, so roughly half of all legs reversed the car and
+   * the traffic spent its life pacing up and down one street.
+   */
+  spawnTrafficVehicle(type, opts = {}) {
+    const roads = this.district.def.roads;
+    if (!roads || roads.length < 2) return null;
+    const n = roads.length;
+    const ai = {
+      axis: opts.axis || 'x',
+      laneIdx: clamp(opts.laneIdx === undefined ? 0 : opts.laneIdx, 0, n - 1),
+      index: clamp(opts.index === undefined ? 0 : opts.index, 0, n - 1),
+      dir: opts.dir >= 0 ? 1 : -1,
+      cruise: this.rng.range(9, 14), panic: 0, honk: 0, stuck: 0,
+    };
+    // Start one junction back from the target so there is road to drive on.
+    if (ai.index + ai.dir < 0 || ai.index + ai.dir >= n) ai.dir = -ai.dir;
+    const from = this.aiPointAt(ai, ai.index);
+    ai.index = clamp(ai.index + ai.dir, 0, n - 1);
+
+    const v = this.spawnVehicle(type, from.x, from.z, 0, opts.color);
+    v.ai = ai;
+    const t = this.aiTargetPoint(ai);
+    v.heading = Math.atan2(t.x - v.x, t.z - v.z);
+    v.group.rotation.y = v.heading;
+    this.addDriver(v);
+    return v;
+  }
+
+  /**
+   * How far to sit from the road's centre line, on the left of the direction of
+   * travel, so oncoming traffic passes on the correct side instead of playing
+   * chicken down the middle.
+   */
+  laneOffset(axis, dir) {
+    const amt = (this.district.def.roadHalf || 7) * 0.46;
+    return axis === 'x' ? (dir > 0 ? -amt : amt) : (dir > 0 ? amt : -amt);
+  }
+
+  /** A point on this lane at the given junction index. */
+  aiPointAt(ai, index) {
+    const roads = this.district.def.roads;
+    const lane = roads[ai.laneIdx] + this.laneOffset(ai.axis, ai.dir);
+    const along = roads[index];
+    return ai.axis === 'x' ? { x: along, z: lane } : { x: lane, z: along };
+  }
+
+  aiTargetPoint(ai) { return this.aiPointAt(ai, ai.index); }
+
+  /**
+   * Pick the next leg at a junction: straight on, or a left or right turn.
+   * A turn swaps the axes - the road you were crossing becomes the road you
+   * are now driving along.
+   */
+  aiAdvance(v) {
+    const ai = v.ai;
+    const roads = this.district.def.roads;
+    const n = roads.length;
+    const options = [];
+
+    const straight = ai.index + ai.dir;
+    if (straight >= 0 && straight < n) {
+      options.push({ axis: ai.axis, laneIdx: ai.laneIdx, index: straight, dir: ai.dir, w: 3 });
+    }
+    const otherAxis = ai.axis === 'x' ? 'z' : 'x';
+    for (const d of [-1, 1]) {
+      const idx = ai.laneIdx + d;
+      if (idx < 0 || idx >= n) continue;
+      options.push({ axis: otherAxis, laneIdx: ai.index, index: idx, dir: d, w: 1 });
+    }
+
+    if (!options.length) {
+      // Boxed into a corner of the grid; turning round is the only move left.
+      ai.dir = -ai.dir;
+      ai.index = clamp(ai.index + ai.dir, 0, n - 1);
+      return;
+    }
+    let total = 0;
+    for (const o of options) total += o.w;
+    let r = this.rng() * total;
+    let pick = options[0];
+    for (const o of options) { r -= o.w; if (r <= 0) { pick = o; break; } }
+    ai.axis = pick.axis; ai.laneIdx = pick.laneIdx; ai.index = pick.index; ai.dir = pick.dir;
+  }
+
+  /** Index of the road nearest a world coordinate. */
+  nearestRoadIdx(val) {
+    const roads = this.district.def.roads;
+    let bi = 0;
+    for (let i = 1; i < roads.length; i++) {
+      if (Math.abs(roads[i] - val) < Math.abs(roads[bi] - val)) bi = i;
+    }
+    return bi;
+  }
+
+  /** Traffic that has to start somewhere specific, e.g. a mission's van. */
+  spawnTrafficNear(type, x, z, color) {
+    const roads = this.district.def.roads;
+    if (!roads || roads.length < 2) return null;
+    const nx = this.nearestRoadIdx(x), nz = this.nearestRoadIdx(z);
+    // Closer to a north-south road means it is driving along z, and vice versa.
+    const axis = Math.abs(roads[nx] - x) < Math.abs(roads[nz] - z) ? 'z' : 'x';
+    return this.spawnTrafficVehicle(type, {
+      axis,
+      laneIdx: axis === 'x' ? nz : nx,
+      index: axis === 'x' ? nx : nz,
+      dir: this.rng.sign(),
+      color,
+    });
+  }
+
+  /** Re-derive a lane from wherever the car has ended up. */
+  aiRelocate(v) {
+    const roads = this.district.def.roads;
+    const nearestIdx = (val) => this.nearestRoadIdx(val);
+    const ai = v.ai;
+    // Whichever axis the car is better aligned with is the one it is on.
+    const fx = Math.abs(Math.sin(v.heading)), fz = Math.abs(Math.cos(v.heading));
+    ai.axis = fx >= fz ? 'x' : 'z';
+    ai.dir = (ai.axis === 'x' ? Math.sin(v.heading) : Math.cos(v.heading)) >= 0 ? 1 : -1;
+    ai.laneIdx = nearestIdx(ai.axis === 'x' ? v.z : v.x);
+    ai.index = nearestIdx(ai.axis === 'x' ? v.x : v.z);
+    const n = roads.length;
+    if (ai.index + ai.dir < 0 || ai.index + ai.dir >= n) ai.dir = -ai.dir;
+    ai.index = clamp(ai.index + ai.dir, 0, n - 1);
+  }
+
+  updateTraffic(dt) {
+    for (const v of this.vehicles) {
+      if (!v.ai || v.occupied || v.wrecked) continue;
+      const ai = v.ai;
+      if (ai.panic > 0) ai.panic -= dt;
+
+      // Arrival is measured along the travel axis only, so drifting off the
+      // lane laterally never counts as reaching the junction.
+      let tgt = this.aiTargetPoint(ai);
+      const along = (ai.axis === 'x' ? tgt.x - v.x : tgt.z - v.z) * ai.dir;
+      if (along < 6) {
+        this.aiAdvance(v);
+        tgt = this.aiTargetPoint(ai);
+      }
+
+      const want = Math.atan2(tgt.x - v.x, tgt.z - v.z);
+      // Vehicle.update turns by `heading -= steer * ...`, so a left turn is a
+      // negative steer. Getting this backwards makes traffic drive in circles.
+      const delta = angleDelta(v.heading, want);
+      const steer = clamp(-delta * 1.7, -1, 1);
+
+      const cruise = ai.panic > 0 ? ai.cruise * 1.9 : ai.cruise;
+      let throttle = Math.abs(v.speed) > cruise ? 0 : 1;
+      // Slow into corners, or a van takes a junction on two wheels.
+      if (Math.abs(delta) > 0.7 && Math.abs(v.speed) > cruise * 0.55) throttle = -0.4;
+
+      if (this.roadAheadBlocked(v)) {
+        throttle = -0.7;
+        ai.honk -= dt;
+        if (ai.honk <= 0 && Math.abs(v.speed) < 3) {
+          ai.honk = 2.2 + Math.random() * 3;
+          const g = audio.gainAt(v.x, v.z, 30);
+          if (g > 0.02) audio.tone(330 + Math.random() * 90, 0.34, { wave: 'square', gain: 0.05 * g });
+        }
+      }
+
+      // Nudged into something and going nowhere: work out where it actually is
+      // and give it a fresh lane out of there.
+      if (Math.abs(v.speed) < 0.7 && throttle > 0) {
+        ai.stuck += dt;
+        if (ai.stuck > 2.4) { ai.stuck = 0; this.aiRelocate(v); }
+      } else ai.stuck = 0;
+
+      this.knockLamps(v, dt);
+      v.update(dt, { throttle, steer, handbrake: false }, this.district.grid);
+    }
+  }
+
+  /**
+   * Put somebody behind the wheel. The driver is parented to the vehicle group
+   * so it inherits the body's position and lean for free, and it is also what
+   * marks the car as somebody else's: you cannot get into an occupied vehicle.
+   */
+  addDriver(v) {
+    const key = this.district.def.id;
+    const base = OUTFITS[key] || OUTFITS.slum;
+    const outfit = Object.assign({}, base, {
+      shirt: this.rng.pick(PED_SHIRTS[key] || PED_SHIRTS.slums),
+      pants: this.rng.pick([0x2f2f36, 0x3b3a42, 0x4a4238, 0x24252c]),
+    });
+    const char = makeCharacter({
+      outfit, simple: true,
+      hairStyle: this.rng.pick(['short', 'short', 'cap', 'long']),
+      tall: this.rng.range(0.94, 1.06),
+    });
+    const s = v.spec.seat || { x: 0, y: v.spec.seatY, z: 0 };
+    // seatPoint() offsets by `s.x` along the vehicle's right, which is -x in
+    // the model's own frame; the sit pose puts the hips 0.5 above the origin.
+    char.group.position.set(-s.x, s.y - 0.5, s.z);
+    char.update(0, 0, 'sit');
+    v.group.add(char.group);
+    v.driver = char;
+    return char;
+  }
+
+  /** The driver gets out, or is no longer there to be shot at. */
+  dismissDriver(v) {
+    if (!v.driver) return;
+    v.group.remove(v.driver.group);
+    v.driver.group.traverse((n) => {
+      if (n.isMesh) {
+        n.geometry.dispose();
+        if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
+        else if (n.material) n.material.dispose();
+      }
+    });
+    v.driver = null;
+  }
+
+  /** Is there something in this car's way in the next few metres? */
+  roadAheadBlocked(v) {
+    const look = 6 + Math.abs(v.speed) * 0.95;
+    const fx = Math.sin(v.heading), fz = Math.cos(v.heading);
+    const rx = -Math.cos(v.heading), rz = Math.sin(v.heading);
+    const test = (x, z, halfWidth) => {
+      const dx = x - v.x, dz = z - v.z;
+      const along = dx * fx + dz * fz;
+      if (along < 0.5 || along > look) return false;
+      return Math.abs(dx * rx + dz * rz) < halfWidth;
+    };
+    for (const o of this.vehicles) {
+      if (o === v) continue;
+      if (test(o.x, o.z, v.spec.w * 0.5 + o.spec.w * 0.5 + 0.4)) return true;
+    }
+    if (!this.player.inVehicle && test(this.player.x, this.player.z, v.spec.w * 0.5 + 1.1)) return true;
+    for (const e of this.combat.enemies) {
+      if (!e.dead && test(e.x, e.z, v.spec.w * 0.5 + 1.0)) return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------ vehicle damage ---
+
+  /**
+   * The single funnel for anything that hurts a vehicle. When the panels run
+   * out it catches fire and starts a fuse rather than simply stopping working,
+   * because a car that is about to go off is far more interesting than one
+   * that has quietly died.
+   */
+  damageVehicleBody(v, amount, source) {
+    if (!v || v.wrecked) return;
+    const started = v.damage(amount, source);
+    if (v.ai && !v.occupied) v.ai.panic = 9;
+    if (!started) return;
+    // Whoever was driving gets out rather than sitting in it for the three
+    // seconds it spends on fire.
+    this.dismissDriver(v);
+    v.fx = makeFireFX();
+    v.fx.position.y = 0.4;
+    v.group.add(v.fx);
+    v.crackle = 0;
+    this.burning.push(v);
+    if (this.player.inVehicle && this.player.vehicle === v) {
+      this.ui.flashBanner('GET OUT', 'Press F. Now.', 'bad');
+      audio.voice(VOICE.hurt, { gain: 0.9, throttle: 0 });
+    } else {
+      this.ui.toast('That one is going up');
+    }
+  }
+
+  updateBurning(dt) {
+    for (let i = this.burning.length - 1; i >= 0; i--) {
+      const v = this.burning[i];
+      if (v.fx) v.fx.userData.update(dt);
+      v.crackle -= dt;
+      if (v.crackle <= 0) {
+        v.crackle = 0.35 + Math.random() * 0.4;
+        audio.fireCrackle(audio.gainAt(v.x, v.z, 26));
+      }
+      v.fuse -= dt;
+      if (v.fuse > 0) continue;
+      this.burning.splice(i, 1);
+      this.explodeVehicle(v);
+    }
+  }
+
+  explodeVehicle(v) {
+    if (v.fx) {
+      v.group.remove(v.fx);
+      v.fx.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); n.material.dispose(); } });
+      v.fx = null;
+    }
+    // Anyone still sitting in it is thrown clear, and then caught by the blast
+    // anyway. The fuse was the warning.
+    if (this.player.inVehicle && this.player.vehicle === v) {
+      this.player.exit(this.district.grid);
+      audio.stopEngine();
+    }
+    this.dismissDriver(v);
+    v.wreck();
+    v.ai = null;
+    v.speed = 0; v.vx = 0; v.vz = 0;
+    this.combat.boom(v.x, 1.0, v.z, { radius: 11.5, damage: 58, scale: 1.3, source: v });
   }
 
   spawnVehicle(type, x, z, rot, color) {
@@ -245,7 +581,11 @@ export class Game {
 
   removeVehicle(v) {
     const i = this.vehicles.indexOf(v);
-    if (i >= 0) this.vehicles.splice(i, 1);
+    // Already gone - a mission and a district change can both want it removed.
+    if (i < 0) return;
+    this.vehicles.splice(i, 1);
+    const b = this.burning.indexOf(v);
+    if (b >= 0) this.burning.splice(b, 1);
     this.scene.remove(v.group);
     v.dispose();
   }
@@ -254,11 +594,19 @@ export class Game {
     if (this.player.inVehicle) this.player.exit(null);
     for (const v of this.vehicles) { this.scene.remove(v.group); v.dispose(); }
     this.vehicles.length = 0;
+    this.burning.length = 0;
+    this.missions.aiVehicles.length = 0;
   }
 
+  /**
+   * The nearest vehicle Nagesh could actually drive. Burnt-out shells are
+   * scenery, and a car with somebody already in it is somebody else's - the
+   * whistle used to teleport passing traffic to your feet, driver and all.
+   */
   nearestVehicle(maxDist) {
     let best = null, bestD = maxDist * maxDist;
     for (const v of this.vehicles) {
+      if (v.wrecked || v.driver) continue;
       const d = dist2(this.player.x, this.player.z, v.x, v.z);
       if (d < bestD) { bestD = d; best = v; }
     }
@@ -271,7 +619,7 @@ export class Game {
    */
   knockLamps(v, dt) {
     const d = this.district;
-    if (!d.lamps) return;
+    if (!d || !d.lamps) return;
     if (Math.abs(v.speed) < 5) return;
     const px = v.x + v.vx * dt;
     const pz = v.z + v.vz * dt;
@@ -280,12 +628,28 @@ export class Game {
       if (b.tag !== 'lamp' || b.disabled) continue;
       if (Math.abs(px - b.x) > b.hw + v.radius || Math.abs(pz - b.z) > b.hd + v.radius) continue;
       if (!d.lamps.knock(b.lamp, v.vx, v.vz)) continue;
-      audio.clang();
-      audio.voice(1.45, { gain: 0.5 });
-      this.ui.toast('Light post down');
-      v.body = Math.max(0, v.body - 5);
+      audio.clang(audio.gainAt(b.x, b.z));
+      if (v === this.player.vehicle) {
+        audio.voice(1.45, { gain: 0.5 });
+        this.ui.toast('Light post down');
+      }
+      this.damageVehicleBody(v, 5, 'lamp');
       // Ploughing through costs a little speed, but not the run.
       v.vx *= 0.9; v.vz *= 0.9; v.speed *= 0.9;
+    }
+  }
+
+  /** Two tonnes of tuk-tuk is a legitimate answer to a man with a pistol. */
+  runOverCheck(v, dt) {
+    const speed = Math.abs(v.speed);
+    if (speed < 6) return;
+    const r = v.spec.w * 0.6 + 0.55;
+    for (const e of this.combat.enemies) {
+      if (e.dead || dist2(e.x, e.z, v.x, v.z) > r * r) continue;
+      this.combat.damageEnemy(e, 28 + speed * 4.5, false);
+      audio.thump();
+      v.speed *= 0.86;
+      this.damageVehicleBody(v, 3, 'impact');
     }
   }
 
@@ -308,6 +672,167 @@ export class Game {
         return;
       }
     }
+  }
+
+  // ----------------------------------------------------------------- shops ---
+
+  buildShops(d) {
+    this.shops = [];
+    for (const key in d.landmarks) {
+      const l = d.landmarks[key];
+      if (!l.shop || !SHOPS[l.shop]) continue;
+      this.shops.push({
+        id: l.shop, def: SHOPS[l.shop],
+        x: l.counter ? l.counter.x : l.cx,
+        z: l.counter ? l.counter.z : l.cz,
+      });
+    }
+  }
+
+  nearestShop() {
+    if (this.player.inVehicle) return null;
+    for (const s of this.shops) {
+      if (dist2(this.player.x, this.player.z, s.x, s.z) < 25) return s;
+    }
+    return null;
+  }
+
+  /**
+   * Build the counter's list. Weapons you already own turn into ammunition for
+   * that weapon, which is the only sensible way for a shop with six lines on it
+   * to stay useful for a whole game.
+   */
+  shopItems(shop) {
+    const items = [];
+    for (const key of shop.def.stock) {
+      const w = WEAPONS[key];
+      if (w) {
+        if (!this.combat.has(key)) {
+          items.push({
+            key, kind: 'weapon', wid: key, name: w.name, price: w.price,
+            desc: w.melee
+              ? Math.round(w.dmg) + ' damage, no ammunition, no noise'
+              : Math.round(w.dmg) + ' damage  ·  ' + w.mag + '-round magazine  ·  ' + Math.round(w.range) + ' m',
+          });
+        } else if (w.mag) {
+          const held = this.combat.reserve(key);
+          items.push({
+            key: key + '_ammo', kind: 'ammo', wid: key,
+            name: w.name + ' rounds', price: w.ammoPrice,
+            desc: '+' + w.ammoPer + ' rounds  ·  holding ' + held + ' / ' + w.maxAmmo,
+            full: held >= w.maxAmmo,
+          });
+        }
+        continue;
+      }
+      const s = SERVICES[key];
+      if (!s) continue;
+      const row = { key, kind: s.vehicle ? 'vehicle' : key, name: s.name, price: s.price, desc: s.desc };
+      if (s.vehicle) row.vehicle = s.vehicle;
+      if (key === 'medkit') row.full = this.player.health >= 100;
+      if (key === 'armour') row.full = this.player.armour >= 100;
+      if (key === 'repair') {
+        const v = this.nearestVehicle(16);
+        row.full = !v || v.wrecked || v.body >= 100;
+        row.desc = !v ? 'No vehicle within reach of the counter'
+          : v.wrecked ? 'That one is past panel beating'
+            : s.desc + '  (' + v.spec.name + ' at ' + Math.round(v.body) + '%)';
+      }
+      items.push(row);
+    }
+    return items;
+  }
+
+  openShop(shop) {
+    this.shopOpen = true;
+    this.input.releaseLock();
+    audio.duckMusic(0.4, 999);
+    const refresh = () => this.ui.showShop(shop, this.shopItems(shop), this.stats.cash, buy, close);
+    const buy = (item) => { this.buy(item); refresh(); };
+    const close = () => this.closeShop();
+    refresh();
+  }
+
+  closeShop() {
+    this.shopOpen = false;
+    this.ui.hideShop();
+    audio.duckMusic(1, 0.2);
+    if (this.running && !this.paused) this.input.requestLock();
+  }
+
+  buy(item) {
+    if (item.full) { audio.denied(); this.ui.toast('Nothing to buy there'); return; }
+    if (this.stats.cash < item.price) {
+      audio.denied();
+      this.ui.toast('Not enough cash. Gurjaap does not do credit and neither does anyone else.');
+      return;
+    }
+
+    let ok = true;
+    switch (item.kind) {
+      case 'weapon':
+        this.combat.give(item.wid);
+        this.ui.toast(WEAPONS[item.wid].name + ' - yours, outright');
+        break;
+      case 'ammo':
+        ok = this.combat.addAmmo(item.wid, WEAPONS[item.wid].ammoPer) > 0;
+        if (ok) this.ui.toast('+' + WEAPONS[item.wid].ammoPer + ' rounds');
+        break;
+      case 'medkit':
+        this.player.heal(100);
+        this.ui.toast('Patched up');
+        break;
+      case 'armour':
+        this.player.addArmour(100);
+        this.ui.toast('Vest on');
+        break;
+      case 'repair': {
+        const v = this.nearestVehicle(16);
+        if (!v || v.wrecked) { ok = false; break; }
+        v.body = 100;
+        if (v.burning) {
+          // Putting the fire out counts as panel beating, and at this price it
+          // is the best value on the counter.
+          const i = this.burning.indexOf(v);
+          if (i >= 0) this.burning.splice(i, 1);
+          if (v.fx) {
+            v.group.remove(v.fx);
+            v.fx.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); n.material.dispose(); } });
+            v.fx = null;
+          }
+          v.burning = false;
+        }
+        this.ui.toast(v.spec.name + ' straightened out');
+        break;
+      }
+      case 'vehicle': {
+        const spot = this.findDeliverySpot();
+        const v = this.spawnVehicle(item.vehicle, spot.x, spot.z, this.player.heading);
+        v.ai = null;
+        this.ui.toast(v.spec.name + ' at the kerb outside');
+        break;
+      }
+      default: ok = false;
+    }
+
+    if (!ok) { audio.denied(); return; }
+    this.stats.cash -= item.price;
+    audio.cashRegister();
+    audio.voice(1.5, { gain: 0.5 });
+    this.save();
+  }
+
+  /** Somewhere beside the shop with enough room to leave a car. */
+  findDeliverySpot() {
+    for (let r = 8; r < 40; r += 3) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * TAU;
+        const x = this.player.x + Math.cos(a) * r;
+        const z = this.player.z + Math.sin(a) * r;
+        if (this.isClear(x, z, 3.4)) return { x, z };
+      }
+    }
+    return { x: this.player.x + 6, z: this.player.z };
   }
 
   // ------------------------------------------------------------ pedestrians ---
@@ -509,7 +1034,7 @@ export class Game {
       this.ui.hide(this.ui.el.hud);
       this.ui.show(this.ui.el.menu);
       this.running = false;
-      this.missions.completed.add('vault_2');
+      this.missions.completed.add('vault_3');
       this.save();
     });
   }
@@ -523,6 +1048,8 @@ export class Game {
         stats: this.stats,
         unlocked: [...this.unlocked],
         missions: this.missions.serialize(),
+        combat: this.combat.serialize(),
+        armour: this.player.armour,
         canWhistle: this.canWhistle,
         ending: this.ending,
       }));
@@ -550,12 +1077,17 @@ export class Game {
         this.stats = Object.assign(this.stats, s.stats || {});
         this.unlocked = new Set(s.unlocked || ['slums']);
         this.missions.restore(s.missions);
+        this.combat.restore(s.combat);
+        this.player.armour = s.armour || 0;
         this.canWhistle = !!s.canWhistle;
         startId = s.district || 'slums';
       }
     } else {
       this.clearSave();
       this.missions.completed.clear();
+      this.combat.reset();
+      this.player.armour = 0;
+      this.player.health = 100;
       this.stats = { cash: 0, fame: 0, debt: 0, contract: false };
       this.unlocked = new Set(['slums']);
       this.canWhistle = false;
@@ -598,10 +1130,11 @@ export class Game {
     // so a key handled inside it could never unpause the game.
     if (this.running && !this.transitioning) {
       if (this.input.hit('Escape')) {
-        if (this.mapOpen) this.toggleMap();
+        if (this.shopOpen) this.closeShop();
+        else if (this.mapOpen) this.toggleMap();
         else this.setPaused(!this.paused);
       }
-      if (this.input.hit('KeyM') && !this.paused) this.toggleMap();
+      if (this.input.hit('KeyM') && !this.paused && !this.shopOpen) this.toggleMap();
     }
 
     if (this.running && !this.paused && !this.transitioning) this.update(dt);
@@ -614,9 +1147,14 @@ export class Game {
   update(dt) {
     const d = this.district;
     const input = this.input;
+    audio.setListener(this.player.x, this.player.z);
 
     // Escape and M are handled in frame(); see the note there.
     if (this.mapOpen) { this.updateHud(dt); return; }
+
+    // The counter holds the whole world still. It is the only shop in a city
+    // where standing still is billable, and that is the joke.
+    if (this.shopOpen) { this.updateHud(dt); return; }
 
     if (this.ui.dialogueActive) {
       if (input.hit('Space') || input.hit('Enter') || input.hit('KeyE')) this.ui.advanceDialogue();
@@ -630,6 +1168,8 @@ export class Game {
       this.player.update(dt, NULL_INPUT, d.grid, this.camera, { grid: d.grid, bounds: d.half - 2.5 });
       this.missions.idleTick(dt);
       this.updatePeds(dt);
+      this.updateBurning(dt);
+      this.combat.update(dt, NULL_INPUT);
       this.updateHud(dt);
       return;
     }
@@ -641,6 +1181,8 @@ export class Game {
     if (this.player.dead) {
       this.deathTimer -= dt;
       this.player.update(dt, NULL_INPUT, d.grid, this.camera);
+      this.updateBurning(dt);
+      this.combat.update(dt, NULL_INPUT);
       if (this.deathTimer <= 0) { this.player.dead = false; this.respawn(); }
       this.updateHud(dt);
       return;
@@ -649,7 +1191,12 @@ export class Game {
     // --- vehicles ----------------------------------------------------------
     if (input.hit('KeyF')) this.toggleVehicle();
     if (input.hit('KeyH')) this.whistle();
-    if (input.hit('KeyE')) this.missions.interact();
+    if (input.hit('KeyE')) {
+      // The counter comes first: if you are standing at one, E is for buying.
+      const shop = this.nearestShop();
+      if (shop) this.openShop(shop);
+      else this.missions.interact();
+    }
 
     if (this.player.inVehicle) {
       const v = this.player.vehicle;
@@ -662,14 +1209,22 @@ export class Game {
       audio.updateEngine(v.rpm01, Math.abs(throttle));
       // Bouncing off a wall at speed hurts.
       if (v.body < 25 && Math.abs(v.speed) > 12) this.damagePlayer(dt * 4, 'wreck');
+      this.runOverCheck(v, dt);
     }
 
+    this.updateTraffic(dt);
     for (const v of this.vehicles) {
-      if (v === this.player.vehicle) continue;
+      if (v === this.player.vehicle || v.ai) continue;
       v.update(dt, null, d.grid);
     }
+    this.updateBurning(dt);
 
-    this.player.update(dt, input, d.grid, this.camera, { grid: d.grid, bounds: d.half - 2.5 });
+    this.player.aiming = this.combat.aiming;
+    this.player.recoil = this.combat.recoil;
+    this.player.update(dt, input, d.grid, this.camera, {
+      grid: d.grid, bounds: d.half - 2.5, aimBlend: this.combat.aimBlend,
+    });
+    this.combat.update(dt, input);
 
     // --- world -------------------------------------------------------------
     this.updatePeds(dt);
@@ -757,8 +1312,24 @@ export class Game {
       cash: this.stats.cash,
       fame: this.stats.fame,
       health: this.player.health,
+      armour: this.player.armour,
       district: d.def.name,
     });
+
+    const w = this.combat.weapon;
+    this.ui.setWeapon({
+      name: w.name,
+      melee: !!w.melee,
+      mag: this.combat.inMag(this.combat.current),
+      magSize: w.mag,
+      reserve: this.combat.reserve(this.combat.current),
+      reloading: this.combat.reloading > 0,
+      count: this.combat.owned.size,
+    });
+    this.ui.setCrosshair(
+      this.combat.aimBlend, this.combat.hitMarker,
+      this.combat.weapon.spread * (this.combat.aiming ? 0.45 : 1) * 900 + 6
+    );
     document.getElementById('debt-row').classList.toggle('hidden', !this.stats.contract);
     document.getElementById('debt').textContent = '₹' + Math.round(this.stats.debt).toLocaleString('en-IN');
 
@@ -767,7 +1338,8 @@ export class Game {
     this.ui.setProgress(mr.progress);
     this.ui.setHint(mr.hint);
 
-    this.ui.setInteract(mr.interactPrompt);
+    const shop = this.nearestShop();
+    this.ui.setInteract(shop ? shop.def.name : mr.interactPrompt);
     const nearCar = !this.player.inVehicle && !!this.nearestVehicle(4.6);
     document.getElementById('veh-prompt').classList.toggle('hidden', !nearCar);
     // Only advertise the whistle when there is nothing to just walk into.
@@ -782,6 +1354,7 @@ export class Game {
 // Used while Nagesh is face down: the camera still drifts, he does not move.
 const NULL_INPUT = {
   mouseDX: 0, mouseDY: 0, wheel: 0,
+  lmb: false, rmb: false, lmbHit: false, rmbHit: false,
   down: () => false, hit: () => false, anyDown: () => false,
 };
 

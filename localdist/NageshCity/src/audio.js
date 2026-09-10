@@ -119,6 +119,24 @@ class Audio {
 
   get time() { return this.ctx ? this.ctx.currentTime : 0; }
 
+  // ------------------------------------------------------------- distance ---
+
+  /** Where the ears are. Set once a frame from the player's position. */
+  setListener(x, z) { this._lx = x; this._lz = z; }
+
+  /**
+   * Volume for something happening at (x, z). Returns 0 when it is far enough
+   * away not to be worth playing at all - traffic is constantly clipping lamp
+   * posts on the other side of the district, and every one of those used to
+   * arrive at full volume in the player's ear.
+   */
+  gainAt(x, z, falloff = 42) {
+    if (this._lx === undefined) return 1;
+    const d = Math.hypot(x - this._lx, z - this._lz);
+    if (d > falloff * 3) return 0;
+    return 1 / (1 + (d / falloff) * (d / falloff) * 3);
+  }
+
   // ---------------------------------------------------------------- voice ---
 
   /**
@@ -276,9 +294,10 @@ class Audio {
   ui() { this.tone(880, 0.07, { wave: 'square', gain: 0.05, to: 1320 }); }
   hit() { this.noise(0.16, { freq: 380, to: 90, gain: 0.3, type: 'lowpass', q: 2 }); }
 
-  crash(force) {
-    this.noise(0.28, { freq: 240, to: 60, gain: Math.min(0.42, 0.1 + force * 0.3), type: 'lowpass' });
-    this.tone(70, 0.22, { wave: 'triangle', gain: 0.16, to: 40 });
+  crash(force, gain = 1) {
+    if (gain <= 0.02) return;
+    this.noise(0.28, { freq: 240, to: 60, gain: Math.min(0.42, 0.1 + force * 0.3) * gain, type: 'lowpass' });
+    this.tone(70, 0.22, { wave: 'triangle', gain: 0.16 * gain, to: 40 });
   }
 
   pickupChime(step) {
@@ -292,11 +311,12 @@ class Audio {
   }
 
   /** A lamp post meeting a bumper: bent steel and a burst bulb. */
-  clang() {
-    this.tone(420, 0.55, { wave: 'triangle', gain: 0.17, to: 165 });
-    this.tone(930, 0.34, { wave: 'square', gain: 0.06, to: 600 });
-    this.noise(0.45, { freq: 2600, to: 420, gain: 0.16, type: 'bandpass', q: 1.2 });
-    this.noise(0.12, { freq: 6200, gain: 0.13, type: 'highpass', delay: 0.02 });
+  clang(gain = 1) {
+    if (gain <= 0.02) return;
+    this.tone(420, 0.55, { wave: 'triangle', gain: 0.17 * gain, to: 165 });
+    this.tone(930, 0.34, { wave: 'square', gain: 0.06 * gain, to: 600 });
+    this.noise(0.45, { freq: 2600, to: 420, gain: 0.16 * gain, type: 'bandpass', q: 1.2 });
+    this.noise(0.12, { freq: 6200, gain: 0.13 * gain, type: 'highpass', delay: 0.02 });
   }
 
   droneWhir() { this.tone(1400, 0.12, { wave: 'square', gain: 0.03, to: 1150 }); }
@@ -321,6 +341,95 @@ class Audio {
   heartbeat() {
     this.tone(58, 0.2, { wave: 'sine', gain: 0.34, to: 38 });
     this.tone(52, 0.24, { wave: 'sine', gain: 0.26, to: 34, delay: 0.26 });
+  }
+
+  // ------------------------------------------------------------- gunplay ---
+
+  /**
+   * Every gun is the same three ingredients in different proportions: a crack
+   * of filtered noise, a body thump, and a tail. The proportions are what make
+   * a pistol sound like a pistol and the rifle sound like a decision.
+   * @param dist metres to the shooter, used to soften distant fire
+   */
+  gunshot(kind = 'pistol', gain = 1, dist = 0) {
+    const far = 1 / (1 + Math.max(0, dist) * 0.022);
+    const g = gain * far;
+    const specs = {
+      pistol: { crack: [2600, 700, 0.07, 0.34], body: [190, 60, 0.1, 0.22], tail: 0.16 },
+      smg: { crack: [3000, 900, 0.05, 0.26], body: [230, 80, 0.07, 0.16], tail: 0.09 },
+      shotgun: { crack: [1500, 260, 0.16, 0.44], body: [110, 38, 0.22, 0.34], tail: 0.3 },
+      rifle: { crack: [3600, 520, 0.11, 0.42], body: [150, 45, 0.16, 0.3], tail: 0.34 },
+    };
+    const s = specs[kind] || specs.pistol;
+    this.noise(s.crack[2], { freq: s.crack[0], to: s.crack[1], gain: s.crack[3] * g, type: 'bandpass', q: 0.6 });
+    this.tone(s.body[0], s.body[2], { wave: 'triangle', gain: s.body[3] * g, to: s.body[1] });
+    this.noise(s.tail, { freq: 900, to: 180, gain: 0.09 * g, type: 'lowpass', delay: 0.03 });
+  }
+
+  dryFire() { this.tone(1800, 0.03, { wave: 'square', gain: 0.06, to: 900 }); }
+  gunSwap() { this.noise(0.07, { freq: 2200, gain: 0.08, type: 'bandpass', q: 3 }); }
+
+  reload() {
+    this.tone(320, 0.05, { wave: 'square', gain: 0.07, to: 180 });
+    this.noise(0.06, { freq: 1400, gain: 0.08, type: 'bandpass', q: 2, delay: 0.16 });
+  }
+
+  reloadDone() {
+    this.tone(560, 0.05, { wave: 'square', gain: 0.08, to: 320 });
+    this.noise(0.05, { freq: 2600, gain: 0.09, type: 'highpass', delay: 0.04 });
+  }
+
+  ricochet(gain = 1) {
+    this.tone(1800 + Math.random() * 1400, 0.13, { wave: 'sine', gain: 0.05 * gain, to: 420 });
+    this.noise(0.05, { freq: 3400, gain: 0.06 * gain, type: 'bandpass', q: 6 });
+  }
+
+  /** A bullet arriving. The headshot version is unmistakably worse. */
+  flesh(headshot) {
+    this.noise(headshot ? 0.16 : 0.09, {
+      freq: headshot ? 340 : 520, to: 90, gain: headshot ? 0.24 : 0.15, type: 'lowpass', q: 1.4,
+    });
+    if (headshot) this.tone(120, 0.12, { wave: 'triangle', gain: 0.12, to: 55 });
+  }
+
+  swing() { this.noise(0.14, { freq: 700, to: 1900, gain: 0.09, type: 'bandpass', q: 1.4 }); }
+  thump() { this.tone(150, 0.12, { wave: 'triangle', gain: 0.2, to: 60 }); this.noise(0.08, { freq: 400, gain: 0.14, type: 'lowpass' }); }
+  targetPing() { this.tone(1320, 0.22, { wave: 'sine', gain: 0.12, to: 1980 }); }
+
+  enemyAlert(gain = 1) {
+    if (gain <= 0.02) return;
+    this.tone(420, 0.1, { wave: 'square', gain: 0.07 * gain, to: 620 });
+    this.tone(620, 0.09, { wave: 'square', gain: 0.06 * gain, to: 480, delay: 0.11 });
+  }
+
+  enemyDown(gain = 1) {
+    if (gain <= 0.02) return;
+    this.tone(240, 0.3, { wave: 'sawtooth', gain: 0.09 * gain, to: 70 });
+    this.noise(0.24, { freq: 300, to: 80, gain: 0.12 * gain, type: 'lowpass', delay: 0.05 });
+  }
+
+  explosion(gain = 1) {
+    if (gain <= 0.02) return;
+    this.noise(0.9, { freq: 900, to: 45, gain: 0.5 * gain, type: 'lowpass', q: 1 });
+    this.tone(64, 0.7, { wave: 'triangle', gain: 0.42 * gain, to: 24 });
+    this.tone(120, 0.3, { wave: 'sawtooth', gain: 0.2 * gain, to: 40 });
+    this.noise(1.5, { freq: 260, to: 70, gain: 0.16 * gain, type: 'lowpass', delay: 0.12 });
+  }
+
+  /** A vehicle catching light, looped by the caller every second or so. */
+  fireCrackle(gain = 1) {
+    if (gain <= 0.02) return;
+    this.noise(0.5, { freq: 700 + Math.random() * 500, to: 260, gain: 0.06 * gain, type: 'bandpass', q: 0.8 });
+  }
+
+  cashRegister() {
+    this.tone(880, 0.08, { wave: 'square', gain: 0.09, to: 1320 });
+    this.tone(1320, 0.14, { wave: 'triangle', gain: 0.1, to: 1760, delay: 0.08 });
+  }
+
+  denied() {
+    this.tone(220, 0.14, { wave: 'square', gain: 0.09, to: 140 });
+    this.tone(160, 0.18, { wave: 'square', gain: 0.08, to: 100, delay: 0.13 });
   }
 
   // --------------------------------------------------------------- engine ---

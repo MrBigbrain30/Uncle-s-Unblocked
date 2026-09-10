@@ -5,9 +5,10 @@
 
 import * as THREE from '../vendor/three.module.js';
 import { MISSIONS, CHARACTERS } from './story.js';
-import { makePickup, makeGateRing, makeWaypoint, makeDrone, makeCharacter, makeVehicle, OUTFITS } from './actors.js';
+import { makePickup, makeGateRing, makeWaypoint, makeDrone, makeCharacter, OUTFITS } from './actors.js';
+import { WEAPONS } from './combat.js';
 import { audio, VOICE } from './audio.js';
-import { clamp, dist2, makeRNG, TAU, dampAngle, angleDelta } from './util.js';
+import { clamp, dist2, makeRNG, TAU, dampAngle } from './util.js';
 
 export class MissionRunner {
   constructor(game) {
@@ -20,7 +21,8 @@ export class MissionRunner {
     this.dynamic = new THREE.Group();
     this.props = [];              // meshes to clean up when an objective ends
     this.drones = [];
-    this.aiCars = [];
+    this.dronesKilled = 0;
+    this.aiVehicles = [];         // real, destructible vehicles owned by a mission
     this.escortNpc = null;
     this.startMarker = null;
     this.giverNpc = null;
@@ -133,6 +135,17 @@ export class MissionRunner {
     this.mission = mission;
     this.state = 'intro';
     audio.voice(VOICE.missionStart);
+    // Anything the briefing puts in your hands arrives before the briefing
+    // ends, so the line about the .32 lands while you are holding it.
+    if (mission.grant) {
+      const gr = mission.grant;
+      if (gr.weapon) {
+        const isNew = this.game.combat.give(gr.weapon, false);
+        if (gr.ammo) this.game.combat.addAmmo(gr.weapon, gr.ammo);
+        if (isNew) this.game.ui.flashBanner('ARMED', WEAPONS[gr.weapon].name, 'good');
+      }
+      if (gr.armour) this.game.player.addArmour(gr.armour);
+    }
     this.game.ui.playDialogue(mission.intro, () => this.startObjectives());
   }
 
@@ -160,6 +173,7 @@ export class MissionRunner {
   finishMission() {
     const m = this.mission;
     this.completed.add(m.id);
+    this.clearMissionAI();
     this.state = 'outro';
     audio.voice(VOICE.missionComplete);
     this.game.ui.flashBanner('MISSION COMPLETE', m.title, 'good');
@@ -183,6 +197,7 @@ export class MissionRunner {
     audio.alarm();
     this.game.ui.flashBanner('MISSION FAILED', reason, 'bad');
     this.endObjective();
+    this.clearMissionAI();
     const m = this.mission;
     this.state = 'idle';
     this.mission = null;
@@ -302,9 +317,77 @@ export class MissionRunner {
         o.state.tooClose = 0;
         o.state.tooFar = 0;
         const start = this.resolvePos(this.mission.start);
-        this.targetCar = this.spawnAICar('van', start.x, start.z, 0x36506e);
+        // A real vehicle, not a puppet: once you stop tailing it you are very
+        // likely to want to shoot it, and you cannot shoot a puppet.
+        this.targetCar = this.spawnMissionAI('van', start.x, start.z, 0x36506e, 'collections');
         break;
       }
+
+      // --- combat ---------------------------------------------------------
+      case 'shoot': {
+        const p = this.resolvePos(src.at);
+        const n = src.count || 6;
+        this.game.combat.clearTargets();
+        for (let i = 0; i < n; i++) {
+          const t = (i / Math.max(1, n - 1) - 0.5) * Math.min(18, n * 3);
+          this.game.combat.spawnTarget(p.x + t, p.z);
+        }
+        o.state.total = n;
+        this.setWaypoints([{ x: p.x, z: p.z, color: 0xff3d8a, label: o.label, kind: 'objective' }]);
+        break;
+      }
+      case 'hunt': {
+        o.state.origin = src.at ? this.resolvePos(src.at) : null;
+        o.state.total = src.total || 5;
+        o.state.tripped = false;
+        if (!o.state.origin) this.tripFight(o, src);
+        else {
+          this.setWaypoints([{ x: o.state.origin.x, z: o.state.origin.z, color: 0xff5a4a, label: o.label, kind: 'target' }]);
+          this.spawnRingMarker(o.state.origin.x, o.state.origin.z, 0xff5a4a, src.radius || 22);
+        }
+        break;
+      }
+      case 'defend': {
+        const p = this.resolvePos(src.at);
+        o.state.target = p;
+        this.timer = src.time || 60;
+        this.timerActive = true;
+        this.spawnRingMarker(p.x, p.z, 0xff6a4a, src.radius || 22);
+        this.setWaypoints([{ x: p.x, z: p.z, color: 0xff6a4a, label: o.label, kind: 'objective' }]);
+        this.game.combat.startWave({
+          endless: true, live: src.live || 3, tiers: src.tiers || ['goon'],
+          radius: 38, minRadius: 20, interval: src.interval || 2.2,
+        });
+        break;
+      }
+      case 'cull': {
+        const n = src.drones || 5;
+        o.state.total = n;
+        o.state.base = this.dronesKilled;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * TAU;
+          this.spawnDrone(
+            this.game.playerPos().x + Math.cos(a) * 38,
+            this.game.playerPos().z + Math.sin(a) * 38,
+            src.aggressive ? 1.2 : 0.92
+          );
+        }
+        this.setWaypoints([]);
+        break;
+      }
+      case 'wreck': {
+        o.state.total = src.count || 1;
+        break;
+      }
+      case 'boss': {
+        o.state.origin = src.at ? this.resolvePos(src.at) : this.game.playerPos();
+        o.state.tripped = false;
+        o.state.boss = null;
+        this.setWaypoints([{ x: o.state.origin.x, z: o.state.origin.z, color: 0xff3b30, label: src.name || o.label, kind: 'target' }]);
+        this.spawnRingMarker(o.state.origin.x, o.state.origin.z, 0xff3b30, 18);
+        break;
+      }
+
       case 'choice': {
         this.game.ui.showChoice(src.options, (id) => this.game.resolveChoice(id));
         break;
@@ -320,12 +403,19 @@ export class MissionRunner {
     this.props.length = 0;
     for (const d of this.drones) { this.dynamic.remove(d.group); disposeTree(d.group); }
     this.drones.length = 0;
-    for (const c of this.aiCars) { this.dynamic.remove(c.group); disposeTree(c.group); }
-    this.aiCars.length = 0;
+    // Scripted traffic outlives the objective that spawned it - you tail the
+    // van in one objective and set fire to it two objectives later - so it is
+    // only parked here, and removed when the mission itself ends.
+    for (const v of this.aiVehicles) { v.ai = null; this.game.dismissDriver(v); }
     this.targetCar = null;
     this.timerActive = false;
     this.progress = null;
     this.setWaypoints([]);
+    // Whoever was still shooting stops being anyone's problem the moment the
+    // objective they belonged to is over.
+    this.game.combat.stopWave();
+    this.game.combat.clearEnemies();
+    this.game.combat.clearTargets();
     if (this.escortNpc) {
       this.dynamic.remove(this.escortNpc.char.group);
       disposeTree(this.escortNpc.char.group);
@@ -336,6 +426,7 @@ export class MissionRunner {
 
   abandonAll() {
     this.endObjective();
+    this.clearMissionAI();
     this.clearStartMarker();
     this.clearGiver();
     this.state = 'idle';
@@ -364,7 +455,11 @@ export class MissionRunner {
       this.timer -= dt;
       if (this.timer <= 0) {
         this.timerActive = false;
-        if (this.obj.type === 'survive' || this.obj.type === 'tail') return this.nextObjective();
+        // These three end when the clock does; everything else fails on it.
+        if (this.obj.type === 'survive' || this.obj.type === 'tail' || this.obj.type === 'defend') {
+          this.game.combat.stopWave();
+          return this.nextObjective();
+        }
         return this.fail('Out of time');
       }
     }
@@ -510,12 +605,140 @@ export class MissionRunner {
         this.progress = { label: Math.round(d) + ' m  (' + min + '-' + max + ')', value: this.timer / (src.time || 90) };
         break;
       }
+
+      // --- combat ---------------------------------------------------------
+      case 'shoot': {
+        const down = this.game.combat.targetsDown;
+        this.progress = { label: 'Boards down', value: down / o.state.total };
+        this.hint = down === 0 ? 'Right mouse to aim, left mouse to fire' : '';
+        if (down >= o.state.total) this.nextObjective();
+        break;
+      }
+      case 'hunt': {
+        if (!o.state.tripped) {
+          const t = o.state.origin;
+          this.hint = 'Get to it';
+          if (dist2(p.x, p.z, t.x, t.z) < Math.pow(src.radius || 22, 2)) this.tripFight(o, src);
+          break;
+        }
+        this.hint = '';
+        this.progress = {
+          label: this.game.combat.liveEnemies + ' still standing',
+          value: clamp(this.killedInObjective(o) / o.state.total, 0, 1),
+        };
+        this.markEnemies();
+        if (o.state.clear) this.nextObjective();
+        break;
+      }
+      case 'defend': {
+        const t = o.state.target;
+        const r = src.radius || 22;
+        const away = dist2(p.x, p.z, t.x, t.z) > r * r;
+        this.hint = away ? 'Get back inside the yard' : '';
+        // Wander off and the clock stops: the objective is holding the ground,
+        // not outrunning it.
+        this.timerActive = !away;
+        this.progress = { label: away ? 'Out of position' : 'Holding', value: 1 - this.timer / (src.time || 60) };
+        this.markEnemies(t);
+        break;
+      }
+      case 'cull': {
+        const got = this.dronesKilled - o.state.base;
+        this.progress = { label: 'Drones down', value: got / o.state.total };
+        this.setWaypoints(this.drones.filter((d) => !d.dead).slice(0, 3)
+          .map((d) => ({ x: d.x, z: d.z, color: 0xff5a4a, label: 'Census drone', kind: 'target' })));
+        if (got >= o.state.total) this.nextObjective();
+        break;
+      }
+      case 'wreck': {
+        const list = this.game.vehicles.filter((v) => v.missionTag === src.ofTag);
+        const gone = list.filter((v) => v.wrecked || v.burning).length;
+        this.progress = { label: 'Written off', value: clamp(gone / o.state.total, 0, 1) };
+        this.setWaypoints(list.filter((v) => !v.wrecked && !v.burning)
+          .map((v) => ({ x: v.x, z: v.z, color: 0xff5a4a, label: 'Collections van', kind: 'target' })));
+        this.hint = gone >= o.state.total ? '' : 'Shoot it until it stops being an asset';
+        if (gone >= o.state.total) this.nextObjective();
+        break;
+      }
+      case 'boss': {
+        if (!o.state.tripped) {
+          const t = o.state.origin;
+          this.hint = 'He is waiting';
+          if (dist2(p.x, p.z, t.x, t.z) < 26 * 26) this.tripBoss(o, src);
+          break;
+        }
+        const b = o.state.boss;
+        if (b && !b.dead) {
+          this.progress = { label: (src.name || 'Boss') + '  -  ' + this.game.combat.liveEnemies + ' on the floor', value: b.health / b.maxHealth };
+          this.setWaypoints([{ x: b.x, z: b.z, color: 0xff3b30, label: src.name || 'Target', kind: 'target' }]);
+        } else {
+          this.game.combat.stopWave();
+          this.nextObjective();
+        }
+        break;
+      }
       default: break;
     }
 
     this.updateDrones(dt);
-    this.updateAICars(dt);
     this.updateEscort(dt);
+  }
+
+  // ------------------------------------------------------------ combat glue ---
+
+  /** Kick off a `hunt` fight, either on arrival or straight away. */
+  tripFight(o, src) {
+    o.state.tripped = true;
+    o.state.clear = false;
+    o.state.killBase = this.game.combat.kills;
+    this.setWaypoints([]);
+    for (const pr of this.props) { this.dynamic.remove(pr); disposeTree(pr); }
+    this.props.length = 0;
+    audio.alarm();
+    this.game.ui.flashBanner('CONTACT', src.label || 'They saw you', 'bad');
+    this.game.combat.startWave({
+      total: src.total || 5, live: src.live || 3, tiers: src.tiers || ['goon'],
+      radius: src.spawnRadius || 34, minRadius: src.minRadius || 15,
+      interval: src.interval || 1.5,
+      onClear: () => { o.state.clear = true; },
+    });
+  }
+
+  tripBoss(o, src) {
+    o.state.tripped = true;
+    this.setWaypoints([]);
+    for (const pr of this.props) { this.dynamic.remove(pr); disposeTree(pr); }
+    this.props.length = 0;
+    audio.alarm();
+    const t = o.state.origin;
+    const a = Math.atan2(this.game.player.x - t.x, this.game.player.z - t.z);
+    o.state.boss = this.game.combat.spawnEnemy({
+      x: t.x + Math.sin(a) * 12, z: t.z + Math.cos(a) * 12,
+      tier: src.boss || 'hishaan', name: src.name, alert: true,
+    });
+    this.game.ui.flashBanner(src.name || 'TARGET', 'Retrieval, this region', 'bad');
+    this.game.combat.startWave({
+      total: src.adds || 6, live: src.live || 3, tiers: src.tiers || ['enforcer'],
+      radius: 34, minRadius: 16, interval: 2.6, endless: false,
+    });
+  }
+
+  killedInObjective(o) {
+    return Math.max(0, this.game.combat.kills - (o.state.killBase || 0));
+  }
+
+  /** Point the navigation at whoever is currently shooting at you. */
+  markEnemies(fallback) {
+    const live = this.game.combat.enemies.filter((e) => !e.dead);
+    if (!live.length) {
+      this.setWaypoints(fallback ? [{ x: fallback.x, z: fallback.z, color: 0xff6a4a, label: 'Hold here', kind: 'objective' }] : []);
+      return;
+    }
+    const p = this.game.playerPos();
+    live.sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z));
+    this.setWaypoints(live.slice(0, 3).map((e) => ({
+      x: e.x, z: e.z, color: 0xff5a4a, label: e.name || 'Retrieval', kind: 'target',
+    })));
   }
 
   // ---------------------------------------------------------------- props ---
@@ -562,18 +785,49 @@ export class MissionRunner {
     d.group.position.set(x, 9 + Math.random() * 4, z);
     this.dynamic.add(d.group);
     this.drones.push({
-      group: d.group, rotors: d.rotors, lens: d.lens,
+      isDrone: true, group: d.group, rotors: d.rotors, lens: d.lens,
       x, z, y: 9, vx: 0, vz: 0, speed: (7.5 + Math.random() * 2.5) * speedScale,
       phase: Math.random() * TAU, scan: 0, whir: Math.random(),
+      hp: 42, dead: false,
     });
     return d;
+  }
+
+  /** Drones are cheap and they are not armoured. Gurjaap was right. */
+  damageDrone(d, dmg) {
+    if (d.dead) return;
+    d.hp -= dmg;
+    audio.ricochet(0.8);
+    if (d.hp > 0) return;
+    d.dead = true;
+    this.dronesKilled++;
+    this.game.combat.puff(d.x, d.y, d.z, 0.55);
+    audio.enemyDown();
+    this.game.ui.killFeed('Census drone');
   }
 
   updateDrones(dt) {
     if (!this.drones.length) return;
     const p = this.game.playerPos();
     const inCar = this.game.player.inVehicle;
-    for (const d of this.drones) {
+    // Nine drones all converging used to deal nine lots of damage at once,
+    // which is not a swarm, it is a wall. The total is capped instead.
+    let scanDps = 0;
+    for (let i = this.drones.length - 1; i >= 0; i--) {
+      const d = this.drones[i];
+      if (d.dead) {
+        // Comes down under its own weight, then stops being anything.
+        d.y -= (d.fall = (d.fall || 0) + dt * 26) * dt;
+        d.group.position.set(d.x, Math.max(0.2, d.y), d.z);
+        d.group.rotation.z += dt * 5;
+        d.group.rotation.x += dt * 3;
+        if (d.y <= 0.3) {
+          this.dynamic.remove(d.group);
+          disposeTree(d.group);
+          this.drones.splice(i, 1);
+        }
+        continue;
+      }
       const dx = p.x - d.x, dz = p.z - d.z;
       const dist = Math.hypot(dx, dz) || 1;
       // Steer toward the player with a lazy orbit so they do not stack up.
@@ -599,64 +853,37 @@ export class MissionRunner {
       d.scan = clamp(d.scan + (scanning ? dt * 1.4 : -dt * 1.8), 0, 1);
       d.lens.material.color.setRGB(1, 0.23 + d.scan * 0.6, 0.19);
       if (scanning) {
-        this.game.damagePlayer(dt * (this.obj && this.obj.__src.aggressive ? 16 : 11), 'drone');
+        scanDps += (this.obj && this.obj.__src.aggressive ? 9 : 6);
       }
       d.whir -= dt;
       if (d.whir <= 0 && dist < 40) { d.whir = 0.35 + Math.random() * 0.4; audio.droneWhir(); }
     }
+    if (scanDps > 0) this.game.damagePlayer(Math.min(scanDps, 15) * dt, 'drone');
   }
 
-  // -------------------------------------------------------------- ai cars ---
+  // ------------------------------------------------------- mission traffic ---
 
-  spawnAICar(type, x, z, color) {
-    const v = makeVehicle(type, color);
-    v.group.position.set(x, 0, z);
-    this.dynamic.add(v.group);
-    const car = {
-      group: v.group, wheels: v.wheels, spec: v.spec,
-      x, z, heading: 0, speed: 0, path: this.buildRoadPath(x, z), leg: 0,
-    };
-    this.aiCars.push(car);
-    return car;
+  /**
+   * A scripted vehicle that drives the road network like any other traffic,
+   * except it is tagged so an objective can ask about it later. It goes into
+   * the game's vehicle list, which means it collides, burns and can be stolen.
+   */
+  spawnMissionAI(type, x, z, color, tag) {
+    const v = this.game.spawnTrafficNear(type, x, z, color);
+    if (!v) return null;
+    v.missionTag = tag;
+    this.aiVehicles.push(v);
+    return v;
   }
 
-  /** A loop of road intersections for an AI car to drive around. */
-  buildRoadPath(x, z) {
-    const roads = this.game.district.def.roads;
-    if (!roads || roads.length < 2) return [{ x, z }];
-    const nearest = (v) => roads.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), roads[0]);
-    let cx = nearest(x), cz = nearest(z);
-    const path = [{ x: cx, z: cz }];
-    let horizontal = true;
-    for (let i = 0; i < 14; i++) {
-      const opts = roads.filter((r) => (horizontal ? r !== cx : r !== cz));
-      const pick = opts[this.rng.int(0, opts.length - 1)];
-      if (horizontal) cx = pick; else cz = pick;
-      path.push({ x: cx, z: cz });
-      horizontal = !horizontal;
+  clearMissionAI() {
+    for (const v of this.aiVehicles) {
+      // Leave a burnt-out one where it died; it is scenery now, and it is
+      // usually the most interesting thing in the street.
+      if (v.wrecked) { v.missionTag = null; continue; }
+      this.game.removeVehicle(v);
     }
-    return path;
-  }
-
-  updateAICars(dt) {
-    for (const c of this.aiCars) {
-      const tgt = c.path[c.leg % c.path.length];
-      const dx = tgt.x - c.x, dz = tgt.z - c.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 5) { c.leg++; continue; }
-      const want = Math.atan2(dx, dz);
-      c.heading = dampAngle(c.heading, want, 3.2, dt);
-      const target = 13;
-      c.speed += (target - c.speed) * dt * 1.6;
-      c.x += Math.sin(c.heading) * c.speed * dt;
-      c.z += Math.cos(c.heading) * c.speed * dt;
-      c.group.position.set(c.x, 0, c.z);
-      c.group.rotation.y = c.heading;
-      for (const w of c.wheels) {
-        w.pivot.rotation.x -= (c.speed * dt) / c.spec.wheelR;
-        if (w.steers) w.pivot.rotation.y = clamp(angleDelta(c.heading, want) * 0.6, -0.5, 0.5);
-      }
-    }
+    this.aiVehicles.length = 0;
   }
 
   // -------------------------------------------------------------- escorts ---
@@ -727,8 +954,10 @@ export class MissionRunner {
     if (!spec) return this.game.playerPos();
     if (spec.lm) {
       const l = this.game.district.landmarks[spec.lm];
-      if (l) return l.spot ? { x: l.spot.x, z: l.spot.z } : { x: l.cx, z: l.cz };
-      return { x: 0, z: 0 };
+      if (!l) return { x: 0, z: 0 };
+      // A landmark can name sub-spots - the yard's berm, the impound's bay.
+      if (spec.key && l[spec.key]) return { x: l[spec.key].x, z: l[spec.key].z };
+      return l.spot ? { x: l.spot.x, z: l.spot.z } : { x: l.cx, z: l.cz };
     }
     if (spec.x !== undefined) return { x: spec.x, z: spec.z };
     return { x: 0, z: 0 };

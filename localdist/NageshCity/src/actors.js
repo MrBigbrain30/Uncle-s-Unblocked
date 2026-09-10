@@ -18,6 +18,11 @@ export const OUTFITS = {
   midtown: { skin: 0x8d5a33, shirt: 0x2f4f7a, pants: 0x242830, hair: 0x140f0b, accent: 0xd9b45a },
   heights: { skin: 0x8d5a33, shirt: 0xe8e2d2, pants: 0xf0ead8, hair: 0x1a120c, accent: 0xd4af37 },
   vault: { skin: 0x8d5a33, shirt: 0x1b1b22, pants: 0x14141a, hair: 0x1a120c, accent: 0x9b2f2f },
+  // Everyone who turns up to take something off you.
+  goon: { skin: 0x7f5230, shirt: 0x4a3a30, pants: 0x2a2622, hair: 0x120d08, accent: 0x8a3f2f },
+  enforcer: { skin: 0x8a5c38, shirt: 0x232833, pants: 0x171a22, hair: 0x14100c, accent: 0xb5203f },
+  retrieval: { skin: 0x9a6a44, shirt: 0x14161c, pants: 0x0f1116, hair: 0x14100c, accent: 0xff3b30 },
+  hishaan: { skin: 0xb07a48, shirt: 0x0e1014, pants: 0x0a0c10, hair: 0x14100e, accent: 0xd4af37 },
 };
 
 /**
@@ -130,6 +135,11 @@ export function makeCharacter(opts = {}) {
     }
   }
 
+  // A socket at the end of the right arm for whatever this person is holding.
+  const hold = new THREE.Group();
+  hold.position.set(0, -0.58 * o.tall - 0.06, 0.06);
+  armR.pivot.add(hold);
+
   g.scale.setScalar(o.scale);
   g.traverse((n) => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = false; } });
 
@@ -138,9 +148,22 @@ export function makeCharacter(opts = {}) {
   /**
    * @param dt seconds
    * @param speed metres/sec, drives cadence and stride
-   * @param mode 'walk' | 'sit' | 'pose' | 'idle'
+   * @param mode 'walk' | 'sit' | 'pose' | 'aim' | 'down' | 'idle'
+   * @param extra {recoil} 0..1, kicks the gun arm up
    */
-  function update(dt, speed, mode = 'walk') {
+  function update(dt, speed, mode = 'walk', extra) {
+    if (mode === 'down') {
+      // Face down in the road. Nobody in this city stops for it.
+      root.position.y = 0.24 * o.tall;
+      root.rotation.x = -1.42;
+      legL.pivot.rotation.x = 0.18; legR.pivot.rotation.x = -0.12;
+      armL.pivot.rotation.x = -0.5; armR.pivot.rotation.x = -1.9;
+      armL.pivot.rotation.z = 0.7; armR.pivot.rotation.z = -0.4;
+      torso.rotation.set(0, 0, 0);
+      headPivot.rotation.set(0.2, 0, 0);
+      return;
+    }
+    root.rotation.x = 0;
     if (mode === 'sit') {
       legL.pivot.rotation.x = -1.45; legR.pivot.rotation.x = -1.45;
       legL.pivot.rotation.z = 0; legR.pivot.rotation.z = 0;
@@ -191,9 +214,22 @@ export function makeCharacter(opts = {}) {
       armL.pivot.rotation.x = b * 2;
       armR.pivot.rotation.x = b * 2;
     }
+
+    // Aiming overrides the arms only: the legs keep walking, which is the whole
+    // point of being able to shoot while you move.
+    if (mode === 'aim') {
+      const kick = extra && extra.recoil ? extra.recoil : 0;
+      armR.pivot.rotation.x = -1.52 + kick * 0.5;
+      armR.pivot.rotation.z = -0.12;
+      armL.pivot.rotation.x = -1.34 + kick * 0.3;
+      armL.pivot.rotation.z = 0.34;
+      torso.rotation.y = -0.22;
+      torso.rotation.x = 0.05;
+      headPivot.rotation.x = 0;
+    }
   }
 
-  return { group: g, update, parts: { head: headPivot, torso, armL, armR, legL, legR, root } };
+  return { group: g, update, parts: { head: headPivot, torso, armL, armR, legL, legR, root, hold } };
 }
 
 // --------------------------------------------------------------- vehicles ---
@@ -514,7 +550,214 @@ const PICKUP_SHAPES = {
     g.add(core);
     return g;
   },
+  ammo: () => {
+    const g = new THREE.Group();
+    const tin = new THREE.Mesh(box(0.5, 0.3, 0.34), mat(0x3f4a35));
+    g.add(tin);
+    const lid = new THREE.Mesh(box(0.52, 0.06, 0.36), mat(0x2a3226));
+    lid.position.y = 0.17;
+    g.add(lid);
+    for (let i = -1; i <= 1; i++) {
+      const r = new THREE.Mesh(cyl(0.05, 0.05, 0.22, 6), new THREE.MeshLambertMaterial({ color: 0xc8a44a, emissive: 0x3a2e10 }));
+      r.position.set(i * 0.13, 0.26, 0);
+      g.add(r);
+    }
+    return g;
+  },
+  medkit: () => {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(box(0.5, 0.34, 0.38), mat(0xe8e4dc)));
+    for (const [w, h] of [[0.3, 0.1], [0.1, 0.3]]) {
+      const c = new THREE.Mesh(box(w, h, 0.4), new THREE.MeshBasicMaterial({ color: 0xd23a3a }));
+      g.add(c);
+    }
+    return g;
+  },
+  armour: () => {
+    const g = new THREE.Group();
+    const plate = new THREE.Mesh(box(0.46, 0.56, 0.18), mat(0x2e3640));
+    g.add(plate);
+    const strap = new THREE.Mesh(box(0.5, 0.1, 0.2), mat(0x1a1f26));
+    strap.position.y = 0.16;
+    g.add(strap);
+    return g;
+  },
 };
+
+// ------------------------------------------------------------------ guns ---
+
+/**
+ * Weapon models. Each returns a group built so that -Z is out of the barrel
+ * once it is parented to a character's hold socket, plus the local muzzle
+ * offset the flash and the tracer are spawned from.
+ */
+export function makeGun(kind = 'pistol') {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshLambertMaterial({ color: 0x2a2d33, emissive: 0x0a0b0d });
+  const grip = mat(0x241d18);
+  const trim = new THREE.MeshLambertMaterial({ color: 0x6a6f78, emissive: 0x141619 });
+  let muzzleZ = 0.3;
+
+  const add = (geo, m, x, y, z) => { const mesh = new THREE.Mesh(geo, m); mesh.position.set(x, y, z); g.add(mesh); return mesh; };
+
+  if (kind === 'pistol') {
+    add(box(0.09, 0.13, 0.42), steel, 0, 0.05, 0.1);
+    add(box(0.07, 0.2, 0.1), grip, 0, -0.1, -0.02);
+    add(box(0.05, 0.05, 0.1), trim, 0, 0.05, 0.32);
+    muzzleZ = 0.36;
+  } else if (kind === 'smg') {
+    add(box(0.1, 0.14, 0.56), steel, 0, 0.05, 0.14);
+    add(box(0.08, 0.26, 0.11), grip, 0, -0.12, -0.03);
+    add(box(0.07, 0.22, 0.09), steel, 0, -0.09, 0.16);      // magazine
+    add(box(0.06, 0.06, 0.2), trim, 0, 0.05, 0.46);          // barrel shroud
+    add(box(0.05, 0.09, 0.24), steel, 0, 0.06, -0.2);        // stock
+    muzzleZ = 0.58;
+  } else if (kind === 'shotgun') {
+    add(box(0.11, 0.13, 0.9), steel, 0, 0.04, 0.24);
+    add(box(0.1, 0.1, 0.34), trim, 0, -0.03, 0.34);          // pump
+    add(box(0.09, 0.24, 0.12), grip, 0, -0.11, -0.06);
+    add(box(0.07, 0.13, 0.32), grip, 0, 0.02, -0.3);
+    muzzleZ = 0.72;
+  } else if (kind === 'rifle') {
+    add(box(0.09, 0.12, 1.0), steel, 0, 0.05, 0.3);
+    add(box(0.08, 0.24, 0.1), grip, 0, -0.11, -0.04);
+    add(box(0.07, 0.2, 0.1), steel, 0, -0.09, 0.1);
+    add(box(0.05, 0.05, 0.34), trim, 0, 0.05, 0.78);
+    add(box(0.06, 0.11, 0.3), grip, 0, 0.03, -0.32);
+    const scope = add(cyl(0.05, 0.05, 0.26, 8), trim, 0, 0.15, 0.2);
+    scope.rotation.x = Math.PI / 2;
+    muzzleZ = 0.96;
+  } else {
+    // Melee: a length of rebar from the yard.
+    add(box(0.05, 0.05, 1.0), trim, 0, 0, 0.4);
+    add(box(0.07, 0.07, 0.2), grip, 0, 0, -0.08);
+    muzzleZ = 0.9;
+  }
+
+  g.traverse((n) => { if (n.isMesh) n.castShadow = true; });
+  g.userData.muzzle = new THREE.Vector3(0, 0.05, muzzleZ);
+  return g;
+}
+
+/** The bright bit at the end of the barrel. Reused, never reallocated. */
+export function makeMuzzleFlash() {
+  const g = new THREE.Group();
+  const m = new THREE.MeshBasicMaterial({ color: 0xffd88a, transparent: true, opacity: 0.9, depthWrite: false });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), m);
+  core.scale.set(1, 1, 1.9);
+  g.add(core);
+  const petals = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 5), m);
+  petals.rotation.x = Math.PI / 2;
+  petals.position.z = 0.16;
+  g.add(petals);
+  g.visible = false;
+  g.userData.mat = m;
+  return g;
+}
+
+/**
+ * A one-shot fireball with debris. `update` returns false when it is finished
+ * and the caller should dispose it.
+ */
+export function makeExplosion(scale = 1) {
+  const g = new THREE.Group();
+  const coreM = new THREE.MeshBasicMaterial({ color: 0xffd06a, transparent: true, opacity: 1, depthWrite: false });
+  const smokeM = new THREE.MeshBasicMaterial({ color: 0x2a2620, transparent: true, opacity: 0.85, depthWrite: false });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), coreM);
+  g.add(core);
+  const smoke = new THREE.Mesh(new THREE.SphereGeometry(1.15, 10, 8), smokeM);
+  g.add(smoke);
+
+  const bits = [];
+  const rng = makeRNG((Math.random() * 1e9) | 0);
+  for (let i = 0; i < 9; i++) {
+    const s = rng.range(0.12, 0.34) * scale;
+    const b = new THREE.Mesh(box(s, s, s), mat(0x1c1a18));
+    const a = rng() * TAU;
+    const sp = rng.range(5, 13) * scale;
+    b.userData.v = { x: Math.cos(a) * sp, y: rng.range(5, 11) * scale, z: Math.sin(a) * sp };
+    b.userData.spin = rng.range(-9, 9);
+    g.add(b);
+    bits.push(b);
+  }
+
+  let t = 0;
+  const life = 1.5;
+  g.userData.update = (dt) => {
+    t += dt;
+    const k = t / life;
+    if (k >= 1) return false;
+    const grow = (1 - Math.pow(1 - Math.min(1, k * 3.4), 3));
+    core.scale.setScalar((0.5 + grow * 3.4) * scale);
+    coreM.opacity = Math.max(0, 1 - k * 3.1);
+    coreM.color.setRGB(1, 0.82 - k * 0.7, 0.42 - k * 0.42);
+    smoke.scale.setScalar((0.7 + grow * 4.2 + k * 1.6) * scale);
+    smoke.position.y = k * 3.4 * scale;
+    smokeM.opacity = Math.max(0, 0.8 - k * 0.85);
+    for (const b of bits) {
+      const v = b.userData.v;
+      v.y -= 22 * dt;
+      b.position.x += v.x * dt;
+      b.position.y += v.y * dt;
+      b.position.z += v.z * dt;
+      if (b.position.y < 0.1) { b.position.y = 0.1; v.y = -v.y * 0.32; v.x *= 0.6; v.z *= 0.6; }
+      b.rotation.x += b.userData.spin * dt;
+      b.rotation.z += b.userData.spin * 0.7 * dt;
+    }
+    return true;
+  };
+  return g;
+}
+
+/** A burning vehicle: two flame cones and a smoke column, animated in place. */
+export function makeFireFX() {
+  const g = new THREE.Group();
+  const flameM = new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.75, depthWrite: false });
+  const smokeM = new THREE.MeshBasicMaterial({ color: 0x2e2a26, transparent: true, opacity: 0.4, depthWrite: false });
+  const flames = [];
+  for (let i = 0; i < 3; i++) {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.5, 6), flameM);
+    f.position.set((i - 1) * 0.5, 1.1, (i % 2) * 0.5 - 0.25);
+    g.add(f);
+    flames.push(f);
+  }
+  const smoke = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 6), smokeM);
+  smoke.position.y = 2.6;
+  g.add(smoke);
+  let t = 0;
+  g.userData.update = (dt) => {
+    t += dt * 9;
+    for (let i = 0; i < flames.length; i++) {
+      const s = 0.7 + Math.sin(t + i * 2.1) * 0.3;
+      flames[i].scale.set(s, 0.8 + Math.sin(t * 1.4 + i) * 0.45, s);
+    }
+    smoke.position.y = 2.4 + Math.sin(t * 0.3) * 0.3;
+    smoke.scale.setScalar(1 + Math.sin(t * 0.45) * 0.18);
+  };
+  return g;
+}
+
+/** A paper target on a stand, for learning which end the noise comes out of. */
+export function makeTarget() {
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(box(0.1, 1.4, 0.1), mat(0x5a4a34));
+  post.position.y = 0.7;
+  g.add(post);
+  const board = new THREE.Mesh(box(1.0, 1.2, 0.07), mat(0xe4dcc4));
+  board.position.y = 1.9;
+  g.add(board);
+  const ringM = [0xd23a3a, 0xe4dcc4, 0xd23a3a];
+  for (let i = 0; i < 3; i++) {
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.42 - i * 0.13, 0.42 - i * 0.13, 0.02, 16),
+      new THREE.MeshBasicMaterial({ color: ringM[i] }));
+    r.rotation.x = Math.PI / 2;
+    r.position.set(0, 1.9, 0.05 + i * 0.005);
+    g.add(r);
+  }
+  g.traverse((n) => { if (n.isMesh) n.castShadow = true; });
+  g.userData.board = board;
+  return g;
+}
 
 /** A floating, spinning collectible with a glow disc under it. */
 export function makePickup(kind = 'scrap', glowHex = 0xffc94a) {

@@ -17,6 +17,29 @@ export class Input {
     this.enabled = true;
     this.dom = dom;
 
+    // Mouse buttons are their own thing rather than pseudo-keys, because the
+    // trigger needs both "is held" (automatics) and "was pressed this frame"
+    // (everything else) and the two behave differently.
+    this.lmb = false; this.rmb = false;
+    this.lmbHit = false; this.rmbHit = false;
+
+    this._onMouseDown = (e) => {
+      // Only once the world has the pointer: the click that captures it is for
+      // capturing it, not for firing.
+      if (!this.locked || !this.enabled) return;
+      if (e.button === 0) { this.lmb = true; this.lmbHit = true; }
+      if (e.button === 2) { this.rmb = true; this.rmbHit = true; }
+      e.preventDefault();
+    };
+    this._onMouseUp = (e) => {
+      if (e.button === 0) this.lmb = false;
+      if (e.button === 2) this.rmb = false;
+    };
+    this._onContext = (e) => { if (this.locked) e.preventDefault(); };
+    window.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mouseup', this._onMouseUp);
+    window.addEventListener('contextmenu', this._onContext);
+
     this._onKeyDown = (e) => {
       if (e.repeat) return;
       const c = e.code;
@@ -32,8 +55,11 @@ export class Input {
       this.mouseDY += e.movementY || 0;
     };
     this._onWheel = (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); };
-    this._onLock = () => { this.locked = document.pointerLockElement === this.dom; };
-    this._onBlur = () => { this.keys.clear(); };
+    this._onLock = () => {
+      this.locked = document.pointerLockElement === this.dom;
+      if (!this.locked) { this.lmb = false; this.rmb = false; }
+    };
+    this._onBlur = () => { this.keys.clear(); this.lmb = false; this.rmb = false; };
 
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
@@ -55,6 +81,8 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.wheel = 0;
+    this.lmbHit = false;
+    this.rmbHit = false;
   }
 }
 
@@ -62,6 +90,8 @@ export class Input {
 
 const WALK = 4.3;
 const SPRINT = 7.8;
+const REGEN = 8;          // health per second, once out of contact
+const REGEN_DELAY = 5.5;  // seconds of not being shot before it starts
 
 export class Player {
   constructor(scene) {
@@ -78,8 +108,18 @@ export class Player {
     this.radius = 0.46;
 
     this.health = 100;
+    this.armour = 0;
+    // Nagesh patches himself up once nobody has hit him for a few seconds.
+    // Without this the Flats become unwinnable by attrition: there is no way
+    // back to full health between two fights except paying Gurjaap.
+    this.regenDelay = 0;
     this.dead = false;
     this.posing = false;
+    // Set by the combat system each frame; drives the aiming pose and the
+    // "face where the camera faces" rule that makes shooting land where you
+    // are looking.
+    this.aiming = false;
+    this.recoil = 0;
 
     this.inVehicle = false;
     this.vehicle = null;
@@ -126,6 +166,14 @@ export class Player {
   update(dt, input, grid, camera, opts = {}) {
     if (this.exitCooldown > 0) this.exitCooldown -= dt;
 
+    // Out-of-combat recovery. Slow enough that you still want to break contact
+    // rather than trade shots, fast enough that losing a fight is not the same
+    // as losing the next three.
+    if (!this.dead) {
+      if (this.regenDelay > 0) this.regenDelay -= dt;
+      else if (this.health < 100) this.health = clamp(this.health + REGEN * dt, 0, 100);
+    }
+
     // --- camera orbit ------------------------------------------------------
     const sens = 0.0022;
     this.camYaw -= input.mouseDX * sens;
@@ -147,8 +195,11 @@ export class Player {
 
     const posing = this.posing && ix === 0 && iz === 0;
     const len = Math.hypot(ix, iz);
-    const sprint = input.down('ShiftLeft') || input.down('ShiftRight');
+    const sprint = (input.down('ShiftLeft') || input.down('ShiftRight')) && !this.aiming;
     let target = 0;
+    // Strafing while aiming: the body stays pointed at the crosshair and the
+    // feet do the work, which is why the move vector and the heading part ways.
+    let moveDir = this.heading;
 
     if (len > 0 && !posing && !this.dead) {
       ix /= len; iz /= len;
@@ -157,24 +208,32 @@ export class Player {
       const wx = ix * cos - iz * sin;
       const wz = -ix * sin - iz * cos;
       const want = Math.atan2(wx, wz);
-      this.heading = dampAngle(this.heading, want, 13, dt);
-      target = sprint ? SPRINT : WALK;
+      moveDir = want;
+      if (!this.aiming) this.heading = dampAngle(this.heading, want, 13, dt);
+      target = sprint ? SPRINT : (this.aiming ? WALK * 0.62 : WALK);
+    }
+
+    // Aiming pins the body to the camera, so the bullet goes where you looked.
+    if (this.aiming && !this.dead) {
+      this.heading = dampAngle(this.heading, this.camYaw + Math.PI, 16, dt);
     }
 
     this.speed = damp(this.speed, target, target > this.speed ? 9 : 12, dt);
 
     if (this.grounded && (input.hit('Space')) && !this.dead) {
-      this.vy = 6.6;
+      // High enough to clear a crate. Getting stuck behind knee-height clutter
+      // was the most common way to lose a fight you should have won.
+      this.vy = 7.4;
       this.grounded = false;
     }
     this.vy -= 21 * dt;
     this.y += this.vy * dt;
     if (this.y <= 0) { this.y = 0; this.vy = 0; this.grounded = true; }
 
-    const nx = this.x + Math.sin(this.heading) * this.speed * dt;
-    const nz = this.z + Math.cos(this.heading) * this.speed * dt;
+    const nx = this.x + Math.sin(moveDir) * this.speed * dt;
+    const nz = this.z + Math.cos(moveDir) * this.speed * dt;
     const pos = { x: nx, z: nz };
-    if (grid) resolveCircle(grid, pos, this.radius);
+    if (grid) resolveCircle(grid, pos, this.radius, { y: this.y });
     this.x = pos.x; this.z = pos.z;
 
     if (opts.bounds !== undefined) {
@@ -185,7 +244,8 @@ export class Player {
 
     this.group.position.set(this.x, this.y, this.z);
     this.group.rotation.y = this.heading;
-    this.char.update(dt, this.dead ? 0 : this.speed, posing ? 'pose' : 'walk');
+    const mode = posing ? 'pose' : (this.aiming && !this.dead ? 'aim' : 'walk');
+    this.char.update(dt, this.dead ? 0 : this.speed, mode, { recoil: this.recoil });
     if (this.dead) {
       // Face down. The camera holds on him for a moment.
       this.group.rotation.x = damp(this.group.rotation.x, -1.4, 6, dt);
@@ -193,8 +253,15 @@ export class Player {
       this.group.rotation.x = damp(this.group.rotation.x, 0, 10, dt);
     }
 
+    // Over the shoulder while aiming: closer, offset, and looking down the
+    // line the gun is on.
+    const aim = opts.aimBlend || 0;
     this.updateCamera(dt, camera, grid, {
-      height: 1.55, dist: this.camDist, lookAhead: 0.6,
+      height: 1.55 + aim * 0.14,
+      dist: this.camDist * (1 - aim * 0.52),
+      lookAhead: 0.6,
+      shoulder: aim * 0.85,
+      fovBoost: -aim * 10,
     });
   }
 
@@ -246,7 +313,14 @@ export class Player {
       dist = Math.max(1.6, dist);
     }
 
-    const want = new THREE.Vector3(tx + ox * dist, ty + oy * dist + 0.9, tz + oz * dist);
+    // Over-the-shoulder offset. It is applied to the look target as well as to
+    // the camera, so the boom slides sideways instead of swinging: the crosshair
+    // keeps pointing along the same line, just past Nagesh instead of into him.
+    const sh = cfg.shoulder || 0;
+    const shx = oz * sh, shz = -ox * sh;
+
+    const want = new THREE.Vector3(
+      tx + ox * dist + shx, ty + oy * dist + 0.9, tz + oz * dist + shz);
     this.camPos.lerp(want, 1 - Math.exp(-11 * dt));
 
     if (this.shake > 0) {
@@ -258,9 +332,9 @@ export class Player {
     }
 
     const lookTarget = new THREE.Vector3(
-      tx - ox * cfg.lookAhead * 0.35,
+      tx - ox * cfg.lookAhead * 0.35 + shx,
       ty + 0.25,
-      tz - oz * cfg.lookAhead * 0.35
+      tz - oz * cfg.lookAhead * 0.35 + shz
     );
     this.camLook.lerp(lookTarget, 1 - Math.exp(-13 * dt));
 
@@ -299,8 +373,15 @@ export class Player {
     this.group.rotation.set(0, this.heading, 0);
   }
 
+  /** Armour eats two thirds of anything that lands, until there is none left. */
   hurt(amount) {
     if (this.dead) return false;
+    this.regenDelay = REGEN_DELAY;
+    if (this.armour > 0) {
+      const soaked = Math.min(this.armour, amount * 0.66);
+      this.armour -= soaked;
+      amount -= soaked;
+    }
     this.health = clamp(this.health - amount, 0, 100);
     this.shake = Math.min(1.2, this.shake + amount * 0.02);
     if (this.health <= 0) { this.dead = true; return true; }
@@ -308,10 +389,12 @@ export class Player {
   }
 
   heal(amount) { this.health = clamp(this.health + amount, 0, 100); }
+  addArmour(amount) { this.armour = clamp(this.armour + amount, 0, 100); }
 
   revive() {
     this.dead = false;
     this.health = 100;
+    this.regenDelay = 0;
     this.group.rotation.x = 0;
   }
 }

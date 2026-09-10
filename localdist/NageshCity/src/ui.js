@@ -19,6 +19,11 @@ export class UI {
       objCount: $('obj-count'), hint: $('hint'),
       cash: $('cash'), fame: $('fame'), district: $('district-name'),
       healthFill: $('health-fill'), bodyFill: $('body-fill'), bodyWrap: $('body-wrap'),
+      armourFill: $('armour-fill'), armourWrap: $('armour-wrap'),
+      weapon: $('weapon'), wpnName: $('wpn-name'), wpnAmmo: $('wpn-ammo'), wpnHint: $('wpn-hint'),
+      crosshair: $('crosshair'), killfeed: $('killfeed'), boom: $('boom'),
+      shop: $('shop'), shopName: $('shop-name'), shopBlurb: $('shop-blurb'),
+      shopList: $('shop-list'), shopCash: $('shop-cash'), shopLine: $('shop-line'),
       speedo: $('speedo'), speedVal: $('speed-val'), speedName: $('speed-name'),
       timer: $('timer'), progress: $('progress'), progFill: $('prog-fill'), progLabel: $('prog-label'),
       toast: $('toast'), interact: $('interact'), whistle: $('whistle-prompt'),
@@ -223,7 +228,107 @@ export class UI {
     this.el.district.textContent = s.district;
     this.el.healthFill.style.width = clamp(s.health, 0, 100) + '%';
     this.el.healthFill.style.background = s.health > 55 ? '#6dff8a' : s.health > 25 ? '#ffd23f' : '#ff4a4a';
+    // The armour bar only exists while there is armour on it.
+    const hasArmour = (s.armour || 0) > 0.5;
+    this.el.armourWrap.classList.toggle('hidden', !hasArmour);
+    if (hasArmour) this.el.armourFill.style.width = clamp(s.armour, 0, 100) + '%';
   }
+
+  /**
+   * The weapon read-out. Fists get a name and nothing else, which is the
+   * cheapest possible way of saying "you have nothing".
+   */
+  setWeapon(w) {
+    // Before Gurjaap there is exactly one thing in your hands and no reason to
+    // put a box on screen about it.
+    if (w.melee && w.count <= 1) { this.el.weapon.classList.add('hidden'); return; }
+    this.el.weapon.classList.remove('hidden');
+    this.el.wpnName.textContent = w.name;
+    if (w.melee) {
+      this.el.wpnAmmo.textContent = '--';
+      this.el.wpnAmmo.classList.remove('dry');
+      this.el.wpnHint.textContent = 'Q to switch';
+      return;
+    }
+    this.el.wpnAmmo.textContent = w.mag + ' / ' + w.reserve;
+    this.el.wpnAmmo.classList.toggle('dry', w.mag === 0);
+    this.el.wpnHint.textContent = w.reloading ? 'RELOADING'
+      : w.mag === 0 ? (w.reserve > 0 ? 'R to reload' : 'Out of ammunition')
+        : 'Q to switch  ·  R to reload';
+  }
+
+  setCrosshair(aim, hit, spreadPx) {
+    const el = this.el.crosshair;
+    const show = aim > 0.02 || hit > 0.02;
+    el.classList.toggle('hidden', !show);
+    if (!show) return;
+    el.style.setProperty('--gap', Math.round(clamp(spreadPx, 5, 46)) + 'px');
+    el.style.opacity = String(clamp(0.35 + aim * 0.65, 0, 1));
+    el.classList.toggle('hit', hit > 0.05);
+  }
+
+  /** A running list of what stopped moving, newest at the bottom. */
+  killFeed(text) {
+    const row = document.createElement('div');
+    row.className = 'kf-row';
+    row.textContent = text;
+    this.el.killfeed.appendChild(row);
+    while (this.el.killfeed.children.length > 4) this.el.killfeed.removeChild(this.el.killfeed.firstChild);
+    setTimeout(() => { if (row.parentNode) row.parentNode.removeChild(row); }, 4200);
+  }
+
+  /** A dull orange thump across the whole screen, unlike the camera's white. */
+  flashBoom() {
+    const el = this.el.boom;
+    el.classList.remove('hidden', 'go');
+    void el.offsetWidth;
+    el.classList.add('go');
+    clearTimeout(this._boomTimer);
+    this._boomTimer = setTimeout(() => el.classList.add('hidden'), 600);
+  }
+
+  // ---------------------------------------------------------------- shops ---
+
+  /**
+   * The counter. Rebuilt on every purchase rather than patched, because the
+   * rows change shape when you buy something - a gun you now own becomes the
+   * ammunition for it.
+   */
+  showShop(shop, items, cash, onBuy, onClose) {
+    const chr = CHARACTERS[shop.def.keeper];
+    this.el.shopName.textContent = shop.def.name;
+    this.el.shopBlurb.textContent = shop.def.blurb;
+    this.el.shopCash.textContent = formatMoney(cash);
+    if (!this._shopLine || this._shopFor !== shop.id) {
+      this._shopFor = shop.id;
+      this._shopLine = shop.def.lines[Math.floor(Math.random() * shop.def.lines.length)];
+    }
+    this.el.shopLine.textContent = '"' + this._shopLine + '"  - ' + (chr ? chr.name : '');
+
+    this.el.shopList.innerHTML = '';
+    for (const item of items) {
+      const b = document.createElement('button');
+      const broke = cash < item.price;
+      b.className = 'btn shop-row' + (broke || item.full ? ' disabled' : '');
+      b.innerHTML =
+        '<span class="si-name">' + item.name + '</span>' +
+        '<span class="si-desc">' + item.desc + '</span>' +
+        '<span class="si-price' + (broke ? ' broke' : '') + '">' +
+        (item.full ? 'HELD' : formatMoney(item.price)) + '</span>';
+      if (!broke && !item.full) b.addEventListener('click', () => onBuy(item));
+      this.el.shopList.appendChild(b);
+    }
+
+    const close = document.createElement('button');
+    close.className = 'btn shop-close';
+    close.textContent = 'LEAVE THE COUNTER';
+    close.addEventListener('click', () => onClose());
+    this.el.shopList.appendChild(close);
+
+    this.show(this.el.shop);
+  }
+
+  hideShop() { this.hide(this.el.shop); this._shopLine = null; }
 
   setVehicle(v) {
     if (!v) { this.el.speedo.classList.add('hidden'); this.el.bodyWrap.classList.add('hidden'); return; }

@@ -132,15 +132,18 @@ kbd {
 #hud.cinematic #map-corner,
 #hud.cinematic #stats,
 #hud.cinematic #health-wrap,
+#hud.cinematic #armour-wrap,
 #hud.cinematic #body-wrap,
 #hud.cinematic #speedo,
 #hud.cinematic #objective,
 #hud.cinematic #veh-prompt,
 #hud.cinematic #whistle-prompt,
 #hud.cinematic #progress,
+#hud.cinematic #weapon,
+#hud.cinematic #killfeed,
 #hud.cinematic #interact { opacity: 0; }
-#map-corner, #stats, #health-wrap, #body-wrap, #speedo, #objective,
-#veh-prompt, #whistle-prompt, #progress, #interact { transition: opacity 0.35s ease; }
+#map-corner, #stats, #health-wrap, #armour-wrap, #body-wrap, #speedo, #objective,
+#veh-prompt, #whistle-prompt, #progress, #weapon, #killfeed, #interact { transition: opacity 0.35s ease; }
 
 #objective {
   position: absolute; top: 22px; left: 24px; max-width: 340px;
@@ -164,11 +167,59 @@ kbd {
 .stat-v.owed { color: var(--owed); text-shadow: 0 0 14px rgba(255, 122, 90, 0.4); }
 
 #health-wrap { position: absolute; bottom: 26px; right: 26px; width: 190px; }
-#body-wrap { position: absolute; bottom: 66px; right: 26px; width: 190px; }
+#armour-wrap { position: absolute; bottom: 66px; right: 26px; width: 190px; }
+#body-wrap { position: absolute; bottom: 106px; right: 26px; width: 190px; }
 .bar-label { font: 700 9px var(--ui); letter-spacing: 0.3em; color: #b3bdcb; margin-bottom: 4px; text-shadow: 0 1px 5px rgba(0,0,0,0.9); }
 .bar { height: 7px; background: rgba(0, 0, 0, 0.6); border: 1px solid var(--edge); }
-#health-fill, #body-fill { height: 100%; width: 100%; background: var(--green); transition: width 0.18s linear, background 0.3s; }
+#health-fill, #body-fill, #armour-fill { height: 100%; width: 100%; background: var(--green); transition: width 0.18s linear, background 0.3s; }
 #body-fill { background: var(--cyan); }
+#armour-fill { background: #8fd0ff; }
+
+/* -------------------------------------------------------------- gunplay --- */
+/* Top of the right-hand column, above the bars. Keeping it out of the centre
+   means it never fights the progress bar at any window width. */
+#weapon {
+  position: absolute; bottom: 150px; right: 26px; text-align: right; width: 190px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+}
+#wpn-name { font: 700 11px var(--ui); letter-spacing: 0.22em; color: var(--dim); }
+#wpn-ammo { font: 700 30px var(--display); line-height: 1.05; letter-spacing: 0.02em; }
+#wpn-ammo.dry { color: var(--red); animation: blink 0.7s steps(2) infinite; }
+#wpn-hint { font: 600 10px var(--ui); letter-spacing: 0.14em; color: #5f6a78; }
+
+#crosshair {
+  position: fixed; left: 50%; top: 50%; width: 0; height: 0; z-index: 6;
+  pointer-events: none; --gap: 10px;
+}
+#crosshair i {
+  position: absolute; background: rgba(240, 246, 255, 0.9); display: block;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+}
+#crosshair .ch-t, #crosshair .ch-b { width: 2px; height: 9px; left: -1px; }
+#crosshair .ch-l, #crosshair .ch-r { width: 9px; height: 2px; top: -1px; }
+#crosshair .ch-t { bottom: var(--gap); }
+#crosshair .ch-b { top: var(--gap); }
+#crosshair .ch-l { right: var(--gap); }
+#crosshair .ch-r { left: var(--gap); }
+#crosshair.hit i { background: #ff6a4a; box-shadow: 0 0 8px rgba(255, 90, 60, 0.9); }
+
+#killfeed {
+  position: absolute; top: 96px; right: 24px; text-align: right;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.kf-row {
+  font: 700 11px var(--ui); letter-spacing: 0.16em; color: #ffb8a8;
+  background: rgba(8, 11, 16, 0.7); border-right: 2px solid var(--red);
+  padding: 4px 10px; animation: kfIn 0.22s ease;
+}
+@keyframes kfIn { from { opacity: 0; transform: translateX(14px); } }
+
+#boom {
+  position: fixed; inset: 0; z-index: 24; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 190, 90, 0.85), rgba(180, 70, 20, 0.35) 55%, rgba(0,0,0,0) 78%);
+}
+#boom.go { animation: boomOut 0.55s ease-out; }
+@keyframes boomOut { 0% { opacity: 0.95; } 100% { opacity: 0; } }
 
 #map-corner { position: absolute; bottom: 22px; left: 24px; width: 210px; }
 #minimap { width: 210px; height: 210px; display: block; filter: drop-shadow(0 6px 18px rgba(0,0,0,0.6)); }
@@ -177,7 +228,8 @@ kbd {
   letter-spacing: 0.26em; color: var(--ink); text-shadow: 0 2px 8px #000;
 }
 
-#speedo { position: absolute; bottom: 96px; right: 26px; text-align: right; }
+/* The right-hand column, bottom up: health, vest, panels, weapon, speed. */
+#speedo { position: absolute; bottom: 214px; right: 26px; text-align: right; }
 #speed-val { font: 700 44px var(--display); line-height: 0.9; color: var(--ink); text-shadow: 0 3px 14px rgba(0,0,0,0.8); }
 .speed-unit { font: 700 9px var(--ui); letter-spacing: 0.34em; color: #6b7686; }
 #speed-name { margin-top: 4px; font: 600 11px var(--ui); letter-spacing: 0.16em; color: var(--cyan); }
@@ -288,6 +340,43 @@ kbd {
 #fullmap-canvas { width: 100%; height: 100%; display: block; }
 .map-foot { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--dim); letter-spacing: 0.1em; }
 
+/* -------------------------------------------------------------- shop --- */
+#shop {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: rgba(3, 4, 8, 0.88); backdrop-filter: blur(3px);
+}
+.shop-inner {
+  width: min(680px, 94vw); max-height: 88vh; overflow: auto; padding: 26px 30px;
+  background: var(--panel); border: 1px solid var(--edge); border-top: 3px solid var(--gold);
+}
+.shop-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+#shop-name { font-family: var(--display); font-size: 27px; letter-spacing: 0.02em; color: var(--gold); }
+#shop-blurb { margin-top: 5px; font-family: var(--serif); font-style: italic; font-size: 13.5px; color: var(--dim); }
+.shop-wallet { text-align: right; flex: 0 0 auto; }
+.shop-wallet-k { font: 700 9px var(--ui); letter-spacing: 0.24em; color: #6b7686; }
+#shop-cash { font: 700 22px var(--display); color: var(--green); }
+#shop-line {
+  margin: 16px 0 4px; padding-left: 12px; border-left: 2px solid var(--cyan);
+  font-family: var(--serif); font-style: italic; font-size: 14px; color: #c3ccd8;
+}
+#shop-list { margin-top: 14px; }
+.shop-row {
+  display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto;
+  gap: 2px 16px; padding: 12px 16px; letter-spacing: 0;
+}
+.si-name { font: 700 14px var(--ui); letter-spacing: 0.1em; grid-column: 1; }
+.si-desc { grid-column: 1; font: 400 12.5px var(--serif); color: var(--dim); }
+.si-price {
+  grid-column: 2; grid-row: 1 / span 2; align-self: center;
+  font: 700 17px var(--display); color: var(--green); letter-spacing: 0.02em;
+}
+.si-price.broke { color: var(--owed); }
+.shop-close { margin-top: 16px; text-align: center; }
+.shop-foot {
+  margin-top: 18px; font-family: var(--serif); font-style: italic; font-size: 12.5px;
+  color: #6b7686; text-align: center;
+}
+
 /* ------------------------------------------------------------ choice --- */
 #choice { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(2, 3, 6, 0.92); }
 .choice-inner { width: min(620px, 92vw); }
@@ -334,4 +423,15 @@ kbd {
   #dlg-portrait, #dlg-portrait canvas { width: 60px; height: 60px; }
   #dlg-text { font-size: 15px; }
   #dlg-text.nagesh-line { font-size: 24px; }
+  /* Tighten the right-hand column so the whole stack still fits above the fold. */
+  #health-wrap, #armour-wrap, #body-wrap, #weapon { width: 140px; }
+  #armour-wrap { bottom: 58px; }
+  #body-wrap { bottom: 90px; }
+  #weapon { bottom: 124px; }
+  #wpn-ammo { font-size: 22px; }
+  #speedo { bottom: 176px; }
+  #killfeed { top: 76px; }
+  .kf-row { font-size: 10px; padding: 3px 8px; }
+  .shop-row { padding: 10px 12px; }
+  .si-price { font-size: 15px; }
 }

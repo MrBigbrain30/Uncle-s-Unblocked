@@ -1,4 +1,4 @@
-// Nagesh City - cast, dialogue and the mission script.
+// Nagesh City - cast, dialogue, shops and the mission script.
 //
 // Nagesh only ever says his own name. Every line of his is the same recorded
 // word at a different pitch, and the parenthetical tells you how to read it.
@@ -6,6 +6,7 @@
 
 // Position helpers. Resolved against a built district at runtime.
 export const lm = (name) => ({ lm: name });
+export const lmAt = (name, key) => ({ lm: name, key });
 export const at = (x, z) => ({ x, z });
 export const scatter = (count, min, max) => ({ scatter: { count, min, max } });
 
@@ -27,6 +28,17 @@ export const CHARACTERS = {
     portrait: { seed: 3, skin: 0x8a5c34, hair: 0x120d08, hairStyle: 'short', cloth: 0x3f6a8a, bg: 0x25303a, bg2: 0x0e141a, smile: 0.9 },
     voice: { wave: 'square', pitch: 660, spread: 0.34, rate: 0.85, gain: 0.1, filter: 3200 },
   },
+  // Gurjaap collected debts for VANTA for eleven years and then stopped. He is
+  // the only person in the Flats who owns anything outright, and the reason is
+  // the reason he will not talk about the eleven years.
+  gurjaap: {
+    name: 'Gurjaap',
+    portrait: {
+      seed: 11, skin: 0x7a4f2c, hair: 0x1e1712, hairStyle: 'short', cloth: 0x4a5a3f,
+      bg: 0x2e2a1e, bg2: 0x110e08, beard: true, smile: 0.05, brow: -0.35,
+    },
+    voice: { wave: 'sawtooth', pitch: 168, spread: 0.16, rate: 1.3, gain: 0.17, filter: 1050 },
+  },
   chandran: {
     name: 'Mr. Chandran',
     portrait: { seed: 4, skin: 0xb07a48, hair: 0x1a1a1e, hairStyle: 'slick', cloth: 0x1e2733, bg: 0x2a1f28, bg2: 0x120b10, smile: 0.7, shades: true },
@@ -41,6 +53,17 @@ export const CHARACTERS = {
     name: 'Auditor Vashti',
     portrait: { seed: 6, skin: 0xc09a72, hair: 0x2a2018, hairStyle: 'slick', cloth: 0x22252c, bg: 0x1c2028, bg2: 0x0a0c10, smile: -0.35, brow: 0.4, glasses: true },
     voice: { wave: 'square', pitch: 380, spread: 0.05, rate: 0.95, gain: 0.13, filter: 2200 },
+  },
+  // Hishaan was intake, then assessment, then Tier Two, and then he was
+  // offered a job instead of a hoarding. He took it. He is what the contract
+  // looks like when somebody decides to be on the winning end of it.
+  hishaan: {
+    name: 'Hishaan',
+    portrait: {
+      seed: 12, skin: 0xb07a48, hair: 0x14100e, hairStyle: 'slick', cloth: 0x0e1014,
+      bg: 0x1c141a, bg2: 0x07060a, smile: 0.5, brow: 0.2,
+    },
+    voice: { wave: 'triangle', pitch: 226, spread: 0.05, rate: 0.92, gain: 0.18, filter: 1650 },
   },
   priya: {
     name: 'Priya Vale',
@@ -62,6 +85,49 @@ export const CHARACTERS = {
 // Shorthand for a Nagesh line: the same word, a different feeling.
 const N = (pitch, cue) => ({ who: 'nagesh', text: 'Nagesh.', cue, pitch });
 const say = (who, text, cue) => ({ who, text, cue });
+
+// ----------------------------------------------------------------- shops ---
+
+/**
+ * Somewhere to put the money. The stock list is resolved against the weapon
+ * table and the service catalogue at runtime; `keeper` is only there so the
+ * counter has a face and a voice behind it.
+ */
+export const SHOPS = {
+  gunYard: {
+    name: "Gurjaap's Yard",
+    keeper: 'gurjaap',
+    blurb: 'Rebar, rounds, and one opinion per customer.',
+    stock: ['bar', 'pistol', 'shotgun', 'medkit', 'armour', 'repair'],
+    lines: [
+      'Cash. Not credit. Credit is how they got you the first time.',
+      'You want it, you pay for it, it is yours. Nothing here accrues.',
+      'Everything on this counter is cheaper than what you owe for standing near it.',
+    ],
+  },
+  pawn: {
+    name: 'Cross Pawn & Surplus',
+    keeper: 'salim',
+    blurb: 'Everything here belonged to somebody who is now on a hoarding.',
+    stock: ['pistol', 'smg', 'shotgun', 'medkit', 'armour', 'repair', 'car_hatch', 'car_sedan'],
+    lines: [
+      'Ex-Retrieval stock. Barely used. Well - used exactly once, mostly.',
+      'I do not ask where the money came from and you do not ask where the gun did.',
+      'Buy the vest. Everybody who did not buy the vest is a very quiet customer.',
+    ],
+  },
+  concierge: {
+    name: 'Aurum Concierge',
+    keeper: 'chandran',
+    blurb: 'Anything a resident could want, billed to a balance that only grows.',
+    stock: ['smg', 'rifle', 'medkit', 'armour', 'repair', 'car_sports', 'car_limo'],
+    lines: [
+      'Cash? How charmingly Flats of you. Yes, of course we take cash.',
+      'Residents rarely pay in cash. Residents rarely pay at all, technically.',
+      'The rifle is a residents-association item. For pests, officially.',
+    ],
+  },
+};
 
 // -------------------------------------------------------------- missions ---
 
@@ -89,12 +155,13 @@ export const MISSIONS = [
     ],
     objectives: [
       { type: 'collect', at: scatter(6, 30, 105), kind: 'scrap', glow: 0xffc94a, label: 'Collect scrap' },
-      { type: 'deliver', at: lm('scrapyard'), label: 'Deliver the scrap to the yard' },
+      { type: 'deliver', at: lm('scrapyard'), label: 'Drop the scrap in the yard bay', radius: 9 },
     ],
     outro: [
       say('deepa', 'Four hundred. Which is four hundred more than yesterday.'),
       N(1.5, 'pleased'),
       say('deepa', 'Do not spend it looking up at the hoardings. They are not selling anything you can buy.'),
+      say('deepa', 'Spend it at Gurjaap\'s, if you must spend it. At least his prices stop when you stop paying.'),
     ],
   },
   {
@@ -110,13 +177,13 @@ export const MISSIONS = [
       say('bittu', 'Nagesh! Nagesh, listen. The impound gate is broken. Has been broken for a week.'),
       N(0.8, 'suspicious'),
       say('bittu', 'It is not stealing if the city already stole it. Deepa says that. Deepa says that all the time.'),
-      say('bittu', 'Yellow one. Three wheels. Take it to the yard before somebody fixes the gate.'),
+      say('bittu', 'Yellow one. Three wheels. It is in the release bay, straight in from the gap in the fence.'),
       N(1.35, 'convinced'),
     ],
     objectives: [
-      { type: 'goto', at: lm('impound'), label: 'Get to the impound', radius: 12 },
-      { type: 'enterVehicle', spawn: { type: 'tuk', at: lm('impound'), offset: [4, 4] }, label: 'Take the tuk-tuk' },
-      { type: 'deliver', at: lm('scrapyard'), label: "Drive it to Deepa's yard", requireVehicle: true, radius: 9 },
+      { type: 'goto', at: lm('impound'), label: 'Get into the impound release bay', radius: 11 },
+      { type: 'enterVehicle', spawn: { type: 'tuk', at: lm('impound'), offset: [2.5, 0] }, label: 'Take the tuk-tuk' },
+      { type: 'deliver', at: lm('scrapyard'), label: "Drive it into Deepa's yard", requireVehicle: true, radius: 9 },
     ],
     outro: [
       say('bittu', 'You drive like a man who has never been in a vehicle. Which is true. So that is fair.'),
@@ -128,48 +195,89 @@ export const MISSIONS = [
   {
     id: 'slum_3',
     district: 'slums',
-    title: 'Water Tuesday',
-    brief: 'The standpipe runs for twelve minutes. Get water to three houses before it stops.',
-    giver: 'deepa',
-    start: lm('scrapyard'),
-    reward: { cash: 500, fame: 2 },
+    title: 'Gurjaap',
+    brief: 'The man at the yard on the east side wants a word, and he has something to put in your hands.',
+    giver: 'gurjaap',
+    start: lm('gunYard'),
+    reward: { cash: 700, fame: 0 },
+    grant: { weapon: 'pistol', ammo: 60 },
     intro: [
-      say('deepa', 'The pipe runs Tuesday and Friday. Today it will run for maybe twelve minutes.'),
-      say('deepa', 'Three houses cannot walk to it. So you will drive to them.'),
-      N(1.1, 'ready'),
-      say('deepa', 'Fast, Nagesh. Not brave. Fast.'),
+      say('gurjaap', 'Stop there. Hands where I can see them, which is a thing I say out of habit, not because you frighten me.'),
+      N(0.9, 'not frightening anybody'),
+      say('gurjaap', 'You are the one running scrap for Deepa. She sent word. She does not send word about people.'),
+      say('gurjaap', 'I collected for VANTA. Eleven years. Doors, furniture, cars, faces. Mostly faces, at the end.'),
+      N(0.75, 'listening'),
+      say('gurjaap', 'Then one Tuesday the address on the sheet was my mother\'s and I found out the sheet does not care.'),
+      say('gurjaap', 'So. They will come for the Flats again, and when they do, Deepa will be standing in front of them holding a clipboard and nothing else.'),
+      say('gurjaap', 'Take this. It is a .32 and it is older than you. Hit the boards at the back before you point it at a person.'),
+      N(1.1, 'taking it'),
+      say('gurjaap', 'Aim with the right button. Fire with the left. Reload before you need to, not while you need to.'),
     ],
     objectives: [
-      { type: 'goto', at: lm('standpipe'), label: 'Fill the cans at Standpipe 4', radius: 9 },
-      {
-        type: 'multiDeliver', at: scatter(3, 40, 110), label: 'Deliver water', kind: 'crate',
-        glow: 0x4fc3e8, time: 150,
-      },
+      { type: 'shoot', at: lmAt('gunYard', 'range'), count: 6, label: 'Knock down six boards' },
+      { type: 'hunt', tiers: ['goon', 'goon', 'repo'], total: 5, live: 3, label: 'They came early. Clear the yard.' },
     ],
     outro: [
-      say('deepa', 'The Nair family says thank you. The Nair family has nothing else to say it with.'),
-      N(1.3, 'warm'),
-      say('deepa', 'This is what the Flats are. Everyone carrying water for everyone else.'),
-      say('deepa', 'Up there they have fountains. Nobody carries anything. Ask yourself who is paying for that.'),
+      say('gurjaap', 'That was a Retrieval sweep. They come out on Tuesdays, same as the water.'),
+      N(0.8, 'breathing hard'),
+      say('gurjaap', 'You did not enjoy that. Good. The day you enjoy it, come and see me and I will take the gun back.'),
+      say('gurjaap', 'Yard is open. Rounds, plates, patching up, and one length of rebar for when the rounds run out.'),
+      say('gurjaap', 'Cash only. Nothing I sell you gets added to anything.'),
     ],
   },
   {
     id: 'slum_4',
     district: 'slums',
+    title: 'Water Tuesday',
+    brief: 'The standpipe runs for twelve minutes. Get water to three houses - and keep it.',
+    giver: 'deepa',
+    start: lm('scrapyard'),
+    reward: { cash: 900, fame: 2 },
+    intro: [
+      say('deepa', 'The pipe runs Tuesday and Friday. Today it will run for maybe twelve minutes.'),
+      say('deepa', 'Three houses cannot walk to it. So you will drive to them.'),
+      N(1.1, 'ready'),
+      say('deepa', 'And Nagesh. Gurjaap says a crew has been sitting on the standpipe road since dawn.'),
+      say('deepa', 'Fast. Not brave. Fast.'),
+      N(0.95, 'trying for fast'),
+    ],
+    objectives: [
+      { type: 'goto', at: lm('standpipe'), label: 'Fill the cans at Standpipe 4', radius: 9 },
+      {
+        type: 'multiDeliver', at: scatter(3, 40, 110), label: 'Deliver water', kind: 'crate',
+        glow: 0x4fc3e8, time: 170,
+      },
+      {
+        type: 'defend', at: lm('scrapyard'), time: 60, radius: 26,
+        tiers: ['repo', 'goon', 'repo'], live: 3, label: 'Hold the yard until they give up',
+      },
+    ],
+    outro: [
+      say('deepa', 'The Nair family says thank you. The Nair family has nothing else to say it with.'),
+      N(1.3, 'warm'),
+      say('deepa', 'They did not come for the water. They came to be seen coming.'),
+      say('deepa', 'Up there they have fountains. Nobody carries anything. Ask yourself who is paying for that.'),
+    ],
+  },
+  {
+    id: 'slum_5',
+    district: 'slums',
     title: 'Census',
-    brief: 'VANTA drones are scanning faces in the Flats. Stay out of their lenses.',
+    brief: 'VANTA drones are scanning faces in the Flats. Gurjaap says take them down.',
     giver: 'bittu',
     start: lm('deepaHut'),
-    reward: { cash: 600, fame: 4 },
+    reward: { cash: 1100, fame: 4 },
     intro: [
       say('bittu', 'They are not counting people. My cousin watched one. It only looks at faces.'),
       say('bittu', 'It looks at your face and then a light goes green and then a letter comes.'),
       N(0.75, 'uneasy'),
       say('bittu', 'Everyone who got a letter went for an audition. Nobody who went came back to say how it went.'),
-      say('bittu', 'Keep out of the light. Ninety seconds and they cycle out.'),
+      say('gurjaap', 'They are not armoured, they are cheap. Four rounds each, less if you are patient.'),
+      say('gurjaap', 'They bill the district for every one you break. Break them anyway.'),
+      N(1.15, 'decided'),
     ],
     objectives: [
-      { type: 'survive', time: 90, drones: 5, label: 'Avoid the census drones', damage: true },
+      { type: 'cull', drones: 6, label: 'Bring down the census drones', damage: true },
     ],
     outro: [
       N(0.9, 'out of breath'),
@@ -180,7 +288,7 @@ export const MISSIONS = [
     ],
   },
   {
-    id: 'slum_5',
+    id: 'slum_6',
     district: 'slums',
     title: 'The Audition',
     brief: 'The VANTA casting van is in the Flats. This is the way out.',
@@ -193,8 +301,9 @@ export const MISSIONS = [
       say('deepa', 'I know where you are going. I have known for three days.'),
       N(0.85, 'guilty'),
       say('deepa', 'Everyone who signs that thing comes back different. Or does not come back, which is the same thing, faster.'),
-      N(1.05, 'pleading'),
-      say('deepa', 'Then go. But read it. Read all of it, Nagesh, even the small part.'),
+      say('gurjaap', 'Let him go, Deepa. He has seen what comes down the hill. Now he can see what sends it.'),
+      say('gurjaap', 'Nagesh. Keep the gun. Do not let them tell you it is theirs.'),
+      N(1.05, 'steady'),
       say('chandran', 'Nagesh! There he is. The face. I said to my colleague, that is a face with an outstanding balance of potential.'),
       say('chandran', 'Standard Visibility Agreement. We advance you a life. You pay us back in attention.'),
       say('chandran', 'It is the fairest deal in this city because it is the only deal in this city.'),
@@ -226,6 +335,7 @@ export const MISSIONS = [
       N(1.15, 'eager'),
       say('salim', 'VANTA bought forty seconds of this district. Your job is to be seen in it. Hit every marker.'),
       say('salim', 'The car has cameras in the wheel arches. Smile with your driving.'),
+      say('salim', 'And the thing under your jacket - keep it under your jacket. Up here you are talent, not muscle.'),
       N(1.45, 'delighted'),
     ],
     objectives: [
@@ -242,6 +352,37 @@ export const MISSIONS = [
   },
   {
     id: 'mid_2',
+    district: 'midtown',
+    title: 'Notices',
+    brief: 'Deliver four repossession notices. Read the addresses. Do it anyway.',
+    giver: 'vashti',
+    start: lm('depot'),
+    reward: { cash: 2200, fame: 6 },
+    intro: [
+      say('vashti', 'Four notices. Four doors. You do not have to speak to anyone.'),
+      N(0.8, 'reluctant'),
+      say('vashti', 'Your own balance went up nine percent this week purely on interest.'),
+      say('vashti', 'Delivering these brings it down. That is not a threat, it is arithmetic.'),
+      N(0.9, 'defeated'),
+    ],
+    objectives: [
+      { type: 'multiDeliver', at: scatter(4, 35, 110), label: 'Deliver notices', kind: 'crate', glow: 0xff6a4a },
+      {
+        type: 'hunt', tiers: ['goon', 'goon', 'goon'], total: 4, live: 3, radius: 26,
+        label: 'The fourth door came back out',
+      },
+    ],
+    outro: [
+      say('crowd', 'You are the boy from the Flats. I saw your face on the van.'),
+      N(0.66, 'ashamed'),
+      say('crowd', 'It is alright. Somebody delivered mine too. He looked exactly like you look now.'),
+      say('vashti', 'For the record, the householders who resisted have been reclassified as an incident.'),
+      say('vashti', 'Incidents are billed to the visible party present. That is you.'),
+      N(0.6, 'very quietly'),
+    ],
+  },
+  {
+    id: 'mid_3',
     district: 'midtown',
     title: 'The Loop',
     brief: 'Stand on the plinths at The Loop and be photographed. Hold each pose.',
@@ -266,59 +407,77 @@ export const MISSIONS = [
     ],
   },
   {
-    id: 'mid_3',
+    id: 'mid_4',
     district: 'midtown',
     title: 'Follow the Money',
-    brief: 'A collections van is doing its rounds. Stay with it. Do not get close.',
+    brief: 'A collections van is doing its rounds. Stay with it. Find out where it ends.',
     giver: 'vashti',
     start: lm('depot'),
-    reward: { cash: 1800, fame: 8 },
+    reward: { cash: 2600, fame: 8 },
     intro: [
       say('vashti', 'You are contracted talent, not staff, so this is technically a promotional appearance.'),
       N(0.95, 'confused'),
       say('vashti', 'Follow the van. Observe the round. Learn what the other end of your agreement looks like.'),
       say('vashti', 'Between twelve and forty metres. Closer and they will see you. Further and you will lose it.'),
+      say('vashti', 'What you do when it stops is not in my remit and I will not be watching.'),
     ],
     objectives: [
       {
         type: 'tail', time: 95, min: 12, max: 46, label: 'Tail the collections van',
         requireVehicle: true, spawn: { type: 'sedan', at: lm('depot'), offset: [9, 6] },
       },
+      {
+        type: 'hunt', tiers: ['repo', 'repo', 'enforcer'], total: 5, live: 3, radius: 22,
+        label: 'The crew got out. So did you.',
+      },
+      { type: 'wreck', count: 1, ofTag: 'collections', label: 'Burn the collections van' },
     ],
     outro: [
       say('vashti', 'You watched them take a woman\'s furniture, her car, and then her face.'),
       N(0.72, 'horrified'),
       say('vashti', 'Her contract was in arrears. Arrears means the visibility reverts to us.'),
-      say('vashti', 'She will be on a hoarding by Thursday. She will not be paid for it.'),
-      N(0.6, 'very quietly'),
-    ],
-  },
-  {
-    id: 'mid_4',
-    district: 'midtown',
-    title: 'Notices',
-    brief: 'Deliver four repossession notices. Read the addresses. Do it anyway.',
-    giver: 'vashti',
-    start: lm('depot'),
-    reward: { cash: 2200, fame: 6 },
-    intro: [
-      say('vashti', 'Four notices. Four doors. You do not have to speak to anyone.'),
-      N(0.8, 'reluctant'),
-      say('vashti', 'Your own balance went up nine percent this week purely on interest.'),
-      say('vashti', 'Delivering these brings it down. That is not a threat, it is arithmetic.'),
-      N(0.9, 'defeated'),
-    ],
-    objectives: [
-      { type: 'multiDeliver', at: scatter(4, 35, 110), label: 'Deliver notices', kind: 'crate', glow: 0xff6a4a },
-    ],
-    outro: [
-      say('crowd', 'You are the boy from the Flats. I saw your face on the van.'),
-      N(0.66, 'ashamed'),
-      say('crowd', 'It is alright. Somebody delivered mine too. He looked exactly like you look now.'),
+      say('vashti', 'The van is a forty-lakh asset and you have set fire to it in front of a camera drone.'),
+      say('vashti', 'I have logged it as a stunt. You are welcome. Do not make me do it twice.'),
+      N(0.85, 'not sure whether that was kindness'),
     ],
   },
   {
     id: 'mid_5',
+    district: 'midtown',
+    title: 'Hishaan',
+    brief: 'Somebody upstairs has been watching you shoot. He would like to shake your hand.',
+    giver: 'hishaan',
+    start: lm('vantaOffice'),
+    reward: { cash: 5000, fame: 12 },
+    intro: [
+      say('hishaan', 'Nagesh. Yes. I have watched that van burn eleven times now. Eleven. It gets better.'),
+      N(0.9, 'wary'),
+      say('hishaan', 'Hishaan. Retrieval, this region. I was intake too. Kaduva Flats, four streets from the standpipe.'),
+      N(1.2, 'surprised'),
+      say('hishaan', 'It surprises everybody. There are two ways off a hoarding: the one they advertise, and mine.'),
+      say('hishaan', 'There is a building on Studio Row full of people who stopped performing. Squatters, technically. Assets, contractually.'),
+      say('hishaan', 'Clear it. Nobody has to be hurt. Realistically some of them will be.'),
+      N(0.7, 'understanding exactly what is being asked'),
+      say('hishaan', 'You can say no. Saying no is a line item. Do you know what line item it is?'),
+      say('hishaan', 'It is yours.'),
+    ],
+    objectives: [
+      { type: 'goto', at: lm('studio9'), label: 'Get to Studio Row', radius: 9 },
+      {
+        type: 'hunt', tiers: ['goon', 'goon', 'repo', 'breacher'], total: 8, live: 4, radius: 30,
+        label: 'Clear the building',
+      },
+    ],
+    outro: [
+      say('hishaan', 'Clean. Fast. You have the temperament, which is rarer than the aim.'),
+      say('crowd', 'I know you. You carried water. You carried water on a Tuesday, I saw you.'),
+      N(0.52, 'wanting the ground to open'),
+      say('hishaan', 'They all say something like that. It is the last thing left that they own.'),
+      say('hishaan', 'Tier Two is being drawn up for you tonight. Sign it. I did.'),
+    ],
+  },
+  {
+    id: 'mid_6',
     district: 'midtown',
     title: 'Sign Here',
     brief: 'VANTA Midtown has an upgraded agreement waiting. The Heights are on the other side of it.',
@@ -387,6 +546,7 @@ export const MISSIONS = [
       say('salim', 'Ratings night. Whole district gets a swarm. Twelve drones, one story, and you are it.'),
       N(1.2, 'game for it'),
       say('salim', 'They are meant to chase. You are meant to run. That is the show.'),
+      say('salim', 'You may shoot them. The audience prefers it. Every one you break is billed to you at retail.'),
       say('salim', 'Do not stop moving. When the numbers dip they fly closer. They fly a lot closer.'),
     ],
     objectives: [
@@ -408,7 +568,7 @@ export const MISSIONS = [
     id: 'hi_3',
     district: 'heights',
     title: 'The Empty House',
-    brief: 'The villa on the east side has been empty for a year. Priya wants what is inside it.',
+    brief: 'The villa on the east side has been empty for a year. It is not unguarded.',
     giver: 'priya',
     start: lm('villa'),
     reward: { cash: 2500, fame: 5 },
@@ -417,11 +577,16 @@ export const MISSIONS = [
       say('priya', 'His name was Arun. He was on more hoardings than me. He tried to stop.'),
       N(0.9, 'listening hard'),
       say('priya', 'He kept a slate. Three pieces of it, hidden, because he knew they would come for it.'),
-      say('priya', 'Bring me the pieces. I have wanted to read it for eleven months and I have never once been brave enough to go.'),
+      say('priya', 'There are men on the lawn. There have been men on the lawn for eleven months.'),
+      say('priya', 'I have wanted to read it since he went and I have never once been brave enough to walk past them.'),
     ],
     objectives: [
+      {
+        type: 'hunt', at: lm('emptyHouse'), tiers: ['retrieval', 'enforcer', 'enforcer'], total: 5, live: 3,
+        radius: 24, label: 'Clear the lawn at the empty house',
+      },
       { type: 'collect', at: scatter(3, 12, 30), kind: 'slate', glow: 0x53d0ff, label: 'Recover the slate fragments', nearLm: 'emptyHouse' },
-      { type: 'deliver', at: lm('villa'), label: 'Take the fragments to Priya' },
+      { type: 'deliver', at: lm('villa'), label: 'Take the fragments to Priya', radius: 8 },
     ],
     outro: [
       say('priya', 'It is his account statement. Six years of it.'),
@@ -463,6 +628,43 @@ export const MISSIONS = [
   {
     id: 'hi_5',
     district: 'heights',
+    title: 'Retrieval',
+    brief: 'Hishaan is waiting at the Spire with a crew and a form for you to sign.',
+    giver: 'hishaan',
+    start: lm('spire'),
+    reward: { cash: 8000, fame: 0 },
+    intro: [
+      say('hishaan', 'You went to the empty house. You took Arun\'s slate to a Tier Two resident.'),
+      N(0.8, 'not denying it'),
+      say('hishaan', 'That is a disclosure event. Do you know what a disclosure event costs?'),
+      say('hishaan', 'Everything. It costs everything, and then it keeps costing, because the balance survives you.'),
+      say('gurjaap', 'Nagesh. It is Gurjaap. Deepa gave me a number for the house line. Do not sign anything.'),
+      N(1.05, 'steadying'),
+      say('hishaan', 'Oh, the collector. Eleven years and he still thinks there is a version of this where somebody wins.'),
+      say('hishaan', 'Gurjaap. I was on your sheet once. Third street off the standpipe. You took my mother\'s cabinet.'),
+      say('gurjaap', 'I know exactly which cabinet.'),
+      say('hishaan', 'Then you understand why I am on this end of it.'),
+      N(0.68, 'no way out but through'),
+    ],
+    objectives: [
+      {
+        type: 'boss', at: lm('spire'), boss: 'hishaan', name: 'Hishaan',
+        tiers: ['retrieval', 'breacher', 'enforcer'], adds: 6, live: 3,
+        label: 'Hishaan and his crew, at the Spire',
+      },
+    ],
+    outro: [
+      say('hishaan', 'That... is not the outcome I modelled.'),
+      N(0.9, 'no triumph in it at all'),
+      say('hishaan', 'You know the worst part. My balance does not stop. Dying is a status, not a settlement.'),
+      say('hishaan', 'They will bill my estate for the clean-up of me. Look it up. It is on the schedule.'),
+      say('gurjaap', 'He is right. I filed those. Line forty-one.'),
+      N(0.58, 'nothing to say and only one word to not say it with'),
+    ],
+  },
+  {
+    id: 'hi_6',
+    district: 'heights',
     title: 'Sub-Level Nine',
     brief: 'The service lift at the VANTA Spire goes down further than the building goes up.',
     giver: 'priya',
@@ -475,6 +677,7 @@ export const MISSIONS = [
       say('priya', 'Whatever you find - you will still have to come back up and live here.'),
       N(0.8, 'steady'),
       say('priya', 'Yes. I suppose that is the brave version.'),
+      say('gurjaap', 'Take everything you have got down there with you. They do not keep an archive unguarded.'),
     ],
     objectives: [
       { type: 'goto', at: lm('spire'), label: 'Find the service lift at the Spire', radius: 7, onFoot: true },
@@ -512,11 +715,40 @@ export const MISSIONS = [
       say('ledger', 'You are the security. The Heights are not a prize. They are a holding facility with good lawns.'),
       N(0.46, 'the bottom falling out'),
       say('ledger', 'The Flats are the intake. Ravi Cross is the assessment. Aurum Heights is where the asset is kept visible until it stops performing.'),
-      say('ledger', 'Deepa was right, incidentally. She is in the file. Everyone who warned somebody is in the file.'),
+      say('ledger', 'Deepa is in the file. Gurjaap is in the file, twice - once as staff, once as an account. Everyone who warned somebody is in the file.'),
     ],
   },
   {
     id: 'vault_2',
+    district: 'vault',
+    title: 'Asset Recovery',
+    brief: 'The archive has noticed you reading it.',
+    giver: 'ledger',
+    start: lm('terminal'),
+    reward: { cash: 0, fame: 0 },
+    autoStart: true,
+    intro: [
+      say('ledger', 'Unscheduled access logged. Retrieval has been dispatched to this level.'),
+      N(0.66, 'not surprised, only tired'),
+      say('ledger', 'This is not a punishment. Punishment is not a service we offer.'),
+      say('ledger', 'This is asset recovery. You are the asset. Please remain where you are.'),
+      N(1.35, 'declining'),
+    ],
+    objectives: [
+      {
+        type: 'hunt', at: lm('terminal'), tiers: ['retrieval', 'breacher', 'retrieval', 'enforcer'],
+        total: 10, live: 4, radius: 30, label: 'Hold the archive floor',
+      },
+    ],
+    outro: [
+      say('ledger', 'Retrieval unsuccessful. Cost of attempt: four hundred and ten thousand.'),
+      say('ledger', 'Billed to account AH-2211.'),
+      N(0.78, 'almost laughing'),
+      say('ledger', 'That was not humour. Two options remain available to your account.'),
+    ],
+  },
+  {
+    id: 'vault_3',
     district: 'vault',
     title: 'Broadcast',
     brief: 'The terminal can push to every hoarding in the city. Or you can sign the Tier Three renewal.',
@@ -526,7 +758,6 @@ export const MISSIONS = [
     autoStart: true,
     final: true,
     intro: [
-      say('ledger', 'Two options are available to your account.'),
       say('ledger', 'One: Tier Three renewal. Your balance is frozen. You become the face of intake. The Flats will see you and want this.'),
       say('ledger', 'Two: broadcast. Every hoarding in Nagesh City shows this ledger for as long as the transmitter lasts.'),
       say('ledger', 'Option two terminates your account. There is no procedure for what happens to you after that.'),
@@ -555,8 +786,10 @@ export const ENDINGS = {
       'Every hoarding in Nagesh City goes dark at 04:11.',
       'Then, on all of them at once, a column of numbers. Eleven thousand four hundred and two names, and beside each one a balance that has never gone down.',
       'In Aurum Heights, a woman who used to fix refrigerators stands in her drive and reads her own name for four hours without moving.',
-      'In Ravi Cross, a collections van pulls over and does not start again.',
-      'In Kaduva Flats, Deepa looks up from the scrap and says nothing at all, and Bittu asks her why she is crying, and she says it is the dust.',
+      'In Ravi Cross, a collections van pulls over and does not start again. The crew get out and stand in the road and read.',
+      'Halfway down the list is HISHAAN, R. - intake, assessment, Tier Two, staff, deceased - and the balance is still accruing, in a column that has no bottom.',
+      'In Kaduva Flats, Gurjaap reads his own name twice, once as a line of staff costs and once as an account, and then he goes inside and does not come out for a day.',
+      'Deepa looks up from the scrap and says nothing at all, and Bittu asks her why she is crying, and she says it is the dust.',
       'The transmitter lasts eleven minutes.',
       'Nobody has seen Nagesh since. His face is still on nine hundred hoardings across the city, and every single one of them is now showing somebody else\'s debt instead.',
     ],
@@ -568,8 +801,10 @@ export const ENDINGS = {
     lines: [
       'The balance freezes at forty-one million, and the freezing is the only mercy in the contract.',
       'Nagesh becomes the face of intake. He is very good at it. He was always going to be very good at it.',
+      'Retrieval, this region, is a post that has been vacant since the Spire. They offer it to him in the same meeting. He says his own name, and they write that down as yes.',
       'In Kaduva Flats a new hoarding goes up on the road out of the yard, four metres of him, smiling.',
       'YOU COULD BE SOMEBODY, it says. Bittu stands under it for a long time.',
+      'Gurjaap sees it on the Tuesday, closes the yard, and sells the stock to a man from Ravi Cross for cash. He does not say why and nobody in the Flats asks him.',
       'Deepa paints over the bottom corner one night. Just the small print. Just the part nobody reads.',
       'By Friday it has been repaired.',
       'Priya Vale sends a note to the Spire. It says: I hope they let you keep your name. She does not get a reply, because replies are not in the contract.',
@@ -596,6 +831,8 @@ export const CHATTER = {
     'My brother went for the audition. That was in March.',
     'I do not look up at the boards any more. It is easier.',
     'Deepa pays cash. Nobody else in the Flats pays cash.',
+    'Gurjaap sold me a plate carrier for what the clinic wanted for a bandage.',
+    'There was shooting on the standpipe road. Nobody came. Nobody ever comes.',
   ],
   midtown: [
     'Three jobs and my balance went up. Explain that to me.',
@@ -603,6 +840,8 @@ export const CHATTER = {
     'I was on a hoarding for a week. I never saw a rupee of it.',
     'They repossessed the flat above mine. Took the face off the door.',
     'Everybody up in the Heights looks so tired in person.',
+    'Retrieval came down Studio Row at four. Four in the afternoon. Not even hiding.',
+    'That Hishaan was from the Flats, you know. That is what makes him good at it.',
   ],
   heights: [
     'We are photographed at six. We are always photographed at six.',
@@ -610,6 +849,7 @@ export const CHATTER = {
     'The gate only opens downward. Ask anybody. Nobody will answer.',
     'I earned four million last year. I owe eleven.',
     'Smile. They can bill you for a neutral expression.',
+    'There was gunfire by the Spire. The association has classified it as fireworks.',
   ],
   vault: [],
 };

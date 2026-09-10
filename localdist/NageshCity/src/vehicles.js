@@ -28,12 +28,23 @@ export class Vehicle {
     this.group.position.set(x, 0, z);
     this.group.rotation.order = 'YXZ';
     this.group.rotation.y = heading;
-    this.lastCrash = 0;
+    // Far enough in the past that the very first impact always registers.
+    this.lastCrash = -1e9;
+
+    // Damage model. `burning` is the window between "this car is finished" and
+    // "this car is a crater", and it is deliberately long enough to get out of.
+    this.burning = false;
+    this.fuse = 0;
+    this.wrecked = false;
+    this.ai = null;         // set by the traffic system
+    this.fx = null;         // fire effect, owned by the game
   }
 
   /** @param input {throttle,steer,handbrake} all -1..1 / bool */
   update(dt, input, grid) {
     const s = this.spec;
+    // A wreck is scenery with momentum. It rolls to a stop and stays there.
+    if (this.wrecked) input = null;
     // Forward is the model's local +Z once yawed. In a Y-up right-handed
     // space, the driver's right is then (-cos h, sin h) - getting this
     // backwards is what made the steering feel inverted.
@@ -96,13 +107,17 @@ export class Vehicle {
     // Substep the move. Flat out, a sports car covers over two metres in a
     // frame, which is enough to pass clean through a wall in one go.
     const dx = this.vx * dt, dz = this.vz * dt;
-    const steps = grid ? Math.min(6, Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.8))) : 1;
+    const steps = grid ? Math.min(8, Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.55))) : 1;
     const pos = { x: this.x, z: this.z };
     let hitCount = 0;
+    let nx = 0, nz = 0;
     for (let i = 0; i < steps; i++) {
       pos.x += dx / steps;
       pos.z += dz / steps;
-      if (grid) hitCount += resolveCircle(grid, pos, this.radius).hits;
+      if (!grid) continue;
+      const r = resolveCircle(grid, pos, this.radius, { iter: 4 });
+      hitCount += r.hits;
+      nx += r.nx; nz += r.nz;
     }
     this.x = pos.x; this.z = pos.z;
     const hit = { hits: hitCount };
@@ -111,19 +126,43 @@ export class Vehicle {
       const impact = Math.abs(this.speed);
       if (impact > 5 && performance.now() - this.lastCrash > 220) {
         this.lastCrash = performance.now();
-        audio.crash(clamp(impact / s.topSpeed, 0, 1));
-        this.body = Math.max(0, this.body - impact * 0.35);
+        audio.crash(clamp(impact / s.topSpeed, 0, 1), audio.gainAt(this.x, this.z));
+        this.damage(impact * 0.42, 'crash');
       }
-      // Scrub off speed rather than stopping dead, so walls feel like walls.
-      const loss = clamp(impact / 12, 0.25, 0.8);
-      this.vx *= 1 - loss; this.vz *= 1 - loss;
-      this.speed *= 1 - loss;
+      // Kill the velocity going *into* the wall and keep what was going along
+      // it, so glancing a building slides you down it instead of parking you.
+      const nl = Math.hypot(nx, nz);
+      if (nl > 0.001) {
+        const ux = nx / nl, uz = nz / nl;
+        const into = this.vx * ux + this.vz * uz;
+        if (into < 0) {
+          // Take out the component going into the wall, and give a real hit a
+          // little of it back as a bounce. Below that threshold it just stops,
+          // or nudging a kerb at walking pace turns into a rattle.
+          const restitution = -into > 6 ? 1.22 : 1;
+          this.vx -= ux * into * restitution;
+          this.vz -= uz * into * restitution;
+        }
+        // Friction against the wall, proportional to how hard you are leaning
+        // on it and scaled by dt. It has to be a rate rather than a per-frame
+        // multiplier: a graze touches the wall for a hundred frames in a row,
+        // and any flat multiplier compounds that into a dead stop.
+        const mu = clamp(Math.abs(into) * 0.055, 0, 1.1);
+        const k = Math.exp(-mu * dt);
+        this.vx *= k; this.vz *= k;
+        // Re-derive forward speed from what survived, or the wheels lie.
+        this.speed = this.vx * fwdX + this.vz * fwdZ;
+      } else {
+        const loss = clamp(impact / 12, 0.25, 0.8);
+        this.vx *= 1 - loss; this.vz *= 1 - loss;
+        this.speed *= 1 - loss;
+      }
     }
 
     // Presentation. 'YXZ' applies yaw first, so pitch and roll happen in the
     // car's own frame instead of tipping it around the world axes.
-    this.group.position.set(this.x, 0, this.z);
-    this.group.rotation.set(this.pitch, this.heading, this.roll);
+    this.group.position.set(this.x, this.wrecked ? -0.09 : 0, this.z);
+    this.group.rotation.set(this.pitch, this.heading, this.roll + (this.wreckRoll || 0));
     const rot = (this.speed * dt) / this.spec.wheelR;
     for (const w of this.wheels) {
       w.pivot.rotation.x -= rot;
@@ -142,6 +181,35 @@ export class Vehicle {
 
   get speedKph() { return Math.abs(this.speed) * 3.6; }
   get rpm01() { return clamp(Math.abs(this.speed) / this.spec.topSpeed, 0, 1); }
+
+  /**
+   * Take damage. Returns true on the frame the car gives up, which is the
+   * caller's cue to light it and start the countdown.
+   * @returns {boolean} the vehicle just started burning
+   */
+  damage(amount, source) {
+    if (this.wrecked || this.burning) return false;
+    this.body = Math.max(0, this.body - amount);
+    if (this.body > 0) return false;
+    this.burning = true;
+    // Longer if somebody is sitting in it: the fuse is a chance to get out,
+    // not a punishment for having been in the wrong seat.
+    this.fuse = this.occupied ? 3.4 : 2.2;
+    return true;
+  }
+
+  /** Turn the burnt-out shell black and take it off the road permanently. */
+  wreck() {
+    this.wrecked = true;
+    this.burning = false;
+    this.group.traverse((n) => {
+      if (!n.isMesh || !n.material || !n.material.color) return;
+      n.material.color.multiplyScalar(0.22);
+      if (n.material.emissive) n.material.emissive.setHex(0x000000);
+      if (n.material.isMeshBasicMaterial) n.material.color.setHex(0x1a1614);
+    });
+    this.wreckRoll = (Math.random() - 0.5) * 0.16;
+  }
 
   /** A point beside the car to step out onto (driver's side). */
   exitPoint() {
